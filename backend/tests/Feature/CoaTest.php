@@ -9,6 +9,9 @@ use App\Domain\Accounting\Services\AccountService;
 use App\Domain\Organization\Exceptions\CrossTenantViolationException;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\TenantContext;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use Tests\TestCase;
@@ -18,15 +21,17 @@ class CoaTest extends TestCase
     use RefreshDatabase;
 
     private Organization $orgA;
+
     private Organization $orgB;
+
     private AccountService $accountService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
 
         $this->orgA = Organization::where('code', 'LP-MAARIF-CLP')->first();
         $this->orgB = Organization::create([

@@ -16,13 +16,16 @@ use App\Domain\Classification\Exceptions\InvalidClassificationDirectionException
 use App\Domain\Classification\Models\BusinessTransaction;
 use App\Domain\Classification\Models\ClassificationRule;
 use App\Domain\Classification\Models\ClassificationSuggestion;
-use App\Domain\Classification\Models\TransactionCategory;
+use App\Domain\Classification\Services\ClassificationRuleService;
 use App\Domain\Classification\Services\TransactionClassificationService;
 use App\Domain\Counterparty\Models\Counterparty;
-use App\Domain\Counterparty\Services\CounterpartyService;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\TenantContext;
 use App\Models\User;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\MasterDataSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -33,23 +36,32 @@ class ClassificationTest extends TestCase
     use RefreshDatabase;
 
     private Organization $orgA;
+
     private Organization $orgB;
+
     private User $adminA;
+
     private User $adminB;
+
     private BankAccount $account308;
+
     private BankAccount $account304;
+
     private BankAccount $account538;
+
     private Counterparty $cpDarwata;
+
     private Counterparty $cpBri;
+
     private TransactionClassificationService $classificationService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
-        $this->seed(\Database\Seeders\MasterDataSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
+        $this->seed(MasterDataSeeder::class);
 
         $this->orgA = Organization::where('code', 'LP-MAARIF-CLP')->firstOrFail();
         $this->adminA = User::where('email', 'admin@maarif-cilacap.org')->firstOrFail();
@@ -536,7 +548,7 @@ class ClassificationTest extends TestCase
 
         // Attempting to create a rule with direction IN but transaction_type OPERATING_EXPENSE must throw!
         $this->classificationService = app(TransactionClassificationService::class);
-        $ruleService = app(\App\Domain\Classification\Services\ClassificationRuleService::class);
+        $ruleService = app(ClassificationRuleService::class);
 
         $ruleService->create([
             'organization_id' => $this->orgA->id,

@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Domain\Audit\Models\AuditLog;
 use App\Domain\Audit\Services\AuditService;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Models\Role;
@@ -17,6 +16,7 @@ class AuditLogTest extends TestCase
     use RefreshDatabase;
 
     protected Organization $org;
+
     protected User $user;
 
     protected function setUp(): void

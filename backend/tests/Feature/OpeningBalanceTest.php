@@ -6,12 +6,13 @@ use App\Domain\Accounting\Exceptions\AlreadyPostedException;
 use App\Domain\Accounting\Exceptions\ImmutableJournalException;
 use App\Domain\Accounting\Exceptions\OpeningBalanceConfigurationException;
 use App\Domain\Accounting\Models\Account;
-use App\Domain\Accounting\Models\AccountMapping;
-use App\Domain\Accounting\Models\OpeningBalanceSource;
 use App\Domain\Accounting\Services\OpeningBalanceService;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\TenantContext;
 use App\Models\User;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -22,17 +23,21 @@ class OpeningBalanceTest extends TestCase
     use RefreshDatabase;
 
     private Organization $org;
+
     private User $maker;
+
     private User $checker;
+
     private OpeningBalanceService $obService;
+
     private int $bankAccountId;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
 
         $this->org = Organization::where('code', 'LP-MAARIF-CLP')->first();
         TenantContext::setTenantId($this->org->id);

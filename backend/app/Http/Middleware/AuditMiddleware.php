@@ -24,9 +24,9 @@ class AuditMiddleware
             if ($user) {
                 $filteredInput = $request->except(['password', 'password_confirmation', 'token', 'secret']);
                 AuditService::log(
-                    action: 'HTTP_' . $request->method(),
-                    notes: 'Route: ' . $request->path() . ' (Status: ' . $response->getStatusCode() . ')',
-                    newValues: !empty($filteredInput) ? $filteredInput : null
+                    action: 'HTTP_'.$request->method(),
+                    notes: 'Route: '.$request->path().' (Status: '.$response->getStatusCode().')',
+                    newValues: ! empty($filteredInput) ? $filteredInput : null
                 );
             }
         }

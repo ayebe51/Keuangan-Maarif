@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Domain\Organization\Models\Permission;
 use App\Domain\Organization\Models\Role;
 use App\Models\User;
 use Database\Seeders\RbacSeeder;

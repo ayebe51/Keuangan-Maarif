@@ -14,7 +14,7 @@ use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, HasRoles, SoftDeletes;
+    use HasApiTokens, HasFactory, HasRoles, Notifiable, SoftDeletes;
 
     protected $guard_name = 'sanctum';
 
@@ -52,6 +52,6 @@ class User extends Authenticatable
 
     public function belongsToOrganization(int $organizationId): bool
     {
-        return (int)$this->organization_id === $organizationId;
+        return (int) $this->organization_id === $organizationId;
     }
 }

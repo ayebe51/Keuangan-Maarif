@@ -15,6 +15,7 @@ class AuthApiTest extends TestCase
     use RefreshDatabase;
 
     protected Organization $org;
+
     protected User $user;
 
     protected function setUp(): void
@@ -108,7 +109,7 @@ class AuthApiTest extends TestCase
     {
         $token = $this->user->createToken('TestDevice')->plainTextToken;
 
-        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
             ->postJson('/api/v1/auth/logout');
 
         $response->assertStatus(200);

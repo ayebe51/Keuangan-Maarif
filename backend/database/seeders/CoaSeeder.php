@@ -338,7 +338,7 @@ class CoaSeeder extends Seeder
 
             // 8. Seed Bank Accounts & Mappings (if bank_accounts table exists)
             $bankGiro308 = DB::table('bank_accounts')->where('organization_id', $orgId)->where('account_number', '0106-01-000308-30-8')->first();
-            if (!$bankGiro308) {
+            if (! $bankGiro308) {
                 $bId = DB::table('bank_accounts')->insertGetId([
                     'organization_id' => $orgId,
                     'bank_name' => 'Bank BRI',
@@ -363,7 +363,7 @@ class CoaSeeder extends Seeder
             );
 
             $bankGiro304 = DB::table('bank_accounts')->where('organization_id', $orgId)->where('account_number', '0106-01-000304-30-0')->first();
-            if (!$bankGiro304) {
+            if (! $bankGiro304) {
                 $bId304 = DB::table('bank_accounts')->insertGetId([
                     'organization_id' => $orgId,
                     'bank_name' => 'Bank BRI',
@@ -388,7 +388,7 @@ class CoaSeeder extends Seeder
             );
 
             $bankTab538 = DB::table('bank_accounts')->where('organization_id', $orgId)->where('account_number', '0106-01-000538-53-8')->first();
-            if (!$bankTab538) {
+            if (! $bankTab538) {
                 $bId538 = DB::table('bank_accounts')->insertGetId([
                     'organization_id' => $orgId,
                     'bank_name' => 'Bank BRI',

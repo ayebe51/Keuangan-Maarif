@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Domain\Accounting\Exceptions\OpeningBalanceConfigurationException;
 use App\Domain\Accounting\Models\Account;
+use App\Domain\Accounting\Models\FiscalPeriod;
 use App\Domain\Bank\Models\BankAccount;
 use App\Domain\Bank\Services\BankAccountService;
 use App\Domain\Classification\Models\TransactionCategory;
@@ -12,12 +13,16 @@ use App\Domain\Counterparty\Models\CounterpartyAlias;
 use App\Domain\Counterparty\Services\CounterpartyService;
 use App\Domain\Fund\Exceptions\NegativeFundBalanceException;
 use App\Domain\Fund\Models\Fund;
-use App\Domain\Fund\Models\FundAllocation;
 use App\Domain\Fund\Services\FundService;
 use App\Domain\Organization\Models\Organization;
+use App\Domain\Organization\Models\Role;
 use App\Domain\Organization\Services\TenantContext;
 use App\Domain\Program\Models\Program;
 use App\Models\User;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\MasterDataSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -27,20 +32,26 @@ class MasterDataTest extends TestCase
     use RefreshDatabase;
 
     private Organization $orgA;
+
     private Organization $orgB;
+
     private User $adminA;
+
     private User $adminB;
+
     private BankAccountService $bankAccountService;
+
     private CounterpartyService $counterpartyService;
+
     private FundService $fundService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
-        $this->seed(\Database\Seeders\MasterDataSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
+        $this->seed(MasterDataSeeder::class);
 
         $this->orgA = Organization::where('code', 'LP-MAARIF-CLP')->firstOrFail();
         $this->orgB = Organization::create([
@@ -59,7 +70,7 @@ class MasterDataTest extends TestCase
             'password' => bcrypt('password123'),
             'is_active' => true,
         ]);
-        $this->adminB->assignRole(\App\Domain\Organization\Models\Role::ACCOUNTING_ADMIN);
+        $this->adminB->assignRole(Role::ACCOUNTING_ADMIN);
 
         $this->bankAccountService = app(BankAccountService::class);
         $this->counterpartyService = app(CounterpartyService::class);
@@ -207,7 +218,7 @@ class MasterDataTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $fund = Fund::where('organization_id', $this->orgA->id)->where('code', 'DANA-RAMADHAN')->firstOrFail();
-        $period = \App\Domain\Accounting\Models\FiscalPeriod::where('organization_id', $this->orgA->id)->firstOrFail();
+        $period = FiscalPeriod::where('organization_id', $this->orgA->id)->firstOrFail();
 
         // 1. Create Allocation Rp10.000.000
         $allocation = $this->fundService->createAllocation([
@@ -240,7 +251,7 @@ class MasterDataTest extends TestCase
         Sanctum::actingAs($this->adminA);
 
         $fund = Fund::where('organization_id', $this->orgA->id)->where('code', 'DANA-BEASISWA')->firstOrFail();
-        $period = \App\Domain\Accounting\Models\FiscalPeriod::where('organization_id', $this->orgA->id)->firstOrFail();
+        $period = FiscalPeriod::where('organization_id', $this->orgA->id)->firstOrFail();
 
         $allocRes = $this->postJson("/api/v1/funds/{$fund->id}/allocate", [
             'fiscal_period_id' => $period->id,

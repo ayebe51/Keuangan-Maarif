@@ -7,23 +7,29 @@ use App\Domain\Accounting\Models\FiscalPeriod;
 use App\Domain\Accounting\Services\FiscalPeriodService;
 use App\Domain\Organization\Models\Organization;
 use App\Models\User;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use Tests\TestCase;
 
 class FiscalPeriodTest extends TestCase
 {
-    use \Illuminate\Foundation\Testing\RefreshDatabase;
+    use RefreshDatabase;
 
     private Organization $org;
+
     private User $admin;
+
     private FiscalPeriodService $periodService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
 
         $this->org = Organization::where('code', 'LP-MAARIF-CLP')->first();
         $this->admin = User::where('email', 'admin@maarif-cilacap.org')->first();

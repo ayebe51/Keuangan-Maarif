@@ -15,9 +15,13 @@ class UserControllerTest extends TestCase
     use RefreshDatabase;
 
     protected Organization $orgA;
+
     protected Organization $orgB;
+
     protected User $adminOrgA;
+
     protected User $operatorOrgA;
+
     protected User $adminOrgB;
 
     protected function setUp(): void
@@ -104,11 +108,11 @@ class UserControllerTest extends TestCase
         Sanctum::actingAs($this->adminOrgA);
 
         // View user in Org B
-        $response = $this->getJson('/api/v1/users/' . $this->adminOrgB->id);
+        $response = $this->getJson('/api/v1/users/'.$this->adminOrgB->id);
         $response->assertStatus(403);
 
         // Delete user in Org B
-        $deleteResponse = $this->deleteJson('/api/v1/users/' . $this->adminOrgB->id);
+        $deleteResponse = $this->deleteJson('/api/v1/users/'.$this->adminOrgB->id);
         $deleteResponse->assertStatus(403);
     }
 }

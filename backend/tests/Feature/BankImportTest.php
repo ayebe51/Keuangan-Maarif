@@ -4,10 +4,7 @@ namespace Tests\Feature;
 
 use App\Domain\Bank\Enums\BankImportStatus;
 use App\Domain\Bank\Enums\BankTransactionDirection;
-use App\Domain\Bank\Enums\BankTransactionStatus;
-use App\Domain\Bank\Exceptions\DuplicateImportException;
 use App\Domain\Bank\Models\BankAccount;
-use App\Domain\Bank\Models\BankImport;
 use App\Domain\Bank\Models\BankRawSource;
 use App\Domain\Bank\Models\BankTransaction;
 use App\Domain\Bank\Services\BankImportService;
@@ -15,6 +12,10 @@ use App\Domain\Counterparty\Models\Counterparty;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\TenantContext;
 use App\Models\User;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\MasterDataSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Laravel\Sanctum\Sanctum;
@@ -26,21 +27,28 @@ class BankImportTest extends TestCase
     use RefreshDatabase;
 
     private Organization $orgA;
+
     private Organization $orgB;
+
     private User $adminA;
+
     private User $adminB;
+
     private BankAccount $account308;
+
     private BankAccount $account304;
+
     private BankAccount $account538;
+
     private BankImportService $importService;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
-        $this->seed(\Database\Seeders\MasterDataSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
+        $this->seed(MasterDataSeeder::class);
 
         $this->orgA = Organization::where('code', 'LP-MAARIF-CLP')->firstOrFail();
         $this->adminA = User::where('email', 'admin@maarif-cilacap.org')->firstOrFail();
@@ -73,12 +81,12 @@ class BankImportTest extends TestCase
      */
     private function createSampleXlsx(string $filename, string $sheetName, array $headers, array $rows): string
     {
-        $path = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $filename;
+        $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.$filename;
         if (file_exists($path)) {
             unlink($path);
         }
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
         // 1. [Content_Types].xml
@@ -111,7 +119,7 @@ class BankImportTest extends TestCase
         $wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
     <sheets>
-        <sheet name="' . htmlspecialchars($sheetName) . '" sheetId="1" r:id="rId1"/>
+        <sheet name="'.htmlspecialchars($sheetName).'" sheetId="1" r:id="rId1"/>
     </sheets>
 </workbook>';
         $zip->addFromString('xl/workbook.xml', $wb);
@@ -119,13 +127,14 @@ class BankImportTest extends TestCase
         // Collect strings and build sheet rows
         $sharedStrings = [];
         $stringIndexMap = [];
-        $getStringIdx = function(string $str) use (&$sharedStrings, &$stringIndexMap) {
+        $getStringIdx = function (string $str) use (&$sharedStrings, &$stringIndexMap) {
             if (isset($stringIndexMap[$str])) {
                 return $stringIndexMap[$str];
             }
             $idx = count($sharedStrings);
             $sharedStrings[] = $str;
             $stringIndexMap[$str] = $idx;
+
             return $idx;
         };
 
@@ -133,25 +142,25 @@ class BankImportTest extends TestCase
         $rowNum = 1;
 
         // Header row
-        $sheetRowsXml .= '<row r="' . $rowNum . '">';
+        $sheetRowsXml .= '<row r="'.$rowNum.'">';
         foreach ($headers as $colIdx => $headerText) {
             $colLetter = chr(65 + $colIdx);
-            $sIdx = $getStringIdx((string)$headerText);
-            $sheetRowsXml .= '<c r="' . $colLetter . $rowNum . '" t="s"><v>' . $sIdx . '</v></c>';
+            $sIdx = $getStringIdx((string) $headerText);
+            $sheetRowsXml .= '<c r="'.$colLetter.$rowNum.'" t="s"><v>'.$sIdx.'</v></c>';
         }
         $sheetRowsXml .= '</row>';
 
         // Data rows
         foreach ($rows as $dataRow) {
             $rowNum++;
-            $sheetRowsXml .= '<row r="' . $rowNum . '">';
+            $sheetRowsXml .= '<row r="'.$rowNum.'">';
             foreach ($dataRow as $colIdx => $val) {
                 $colLetter = chr(65 + $colIdx);
                 if (is_numeric($val)) {
-                    $sheetRowsXml .= '<c r="' . $colLetter . $rowNum . '"><v>' . $val . '</v></c>';
+                    $sheetRowsXml .= '<c r="'.$colLetter.$rowNum.'"><v>'.$val.'</v></c>';
                 } else {
-                    $sIdx = $getStringIdx((string)$val);
-                    $sheetRowsXml .= '<c r="' . $colLetter . $rowNum . '" t="s"><v>' . $sIdx . '</v></c>';
+                    $sIdx = $getStringIdx((string) $val);
+                    $sheetRowsXml .= '<c r="'.$colLetter.$rowNum.'" t="s"><v>'.$sIdx.'</v></c>';
                 }
             }
             $sheetRowsXml .= '</row>';
@@ -160,15 +169,15 @@ class BankImportTest extends TestCase
         // 5. xl/worksheets/sheet1.xml
         $ws = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-    <sheetData>' . $sheetRowsXml . '</sheetData>
+    <sheetData>'.$sheetRowsXml.'</sheetData>
 </worksheet>';
         $zip->addFromString('xl/worksheets/sheet1.xml', $ws);
 
         // 6. xl/sharedStrings.xml
         $ssXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' . count($sharedStrings) . '" uniqueCount="' . count($sharedStrings) . '">';
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'.count($sharedStrings).'" uniqueCount="'.count($sharedStrings).'">';
         foreach ($sharedStrings as $str) {
-            $ssXml .= '<si><t>' . htmlspecialchars($str) . '</t></si>';
+            $ssXml .= '<si><t>'.htmlspecialchars($str).'</t></si>';
         }
         $ssXml .= '</sst>';
         $zip->addFromString('xl/sharedStrings.xml', $ssXml);
@@ -183,13 +192,14 @@ class BankImportTest extends TestCase
      */
     private function createSampleCsv(string $filename, array $headers, array $rows, string $delimiter = ','): string
     {
-        $path = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $filename;
+        $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.$filename;
         $fp = fopen($path, 'w');
         fputcsv($fp, $headers, $delimiter);
         foreach ($rows as $row) {
             fputcsv($fp, $row, $delimiter);
         }
         fclose($fp);
+
         return $path;
     }
 
@@ -202,7 +212,7 @@ class BankImportTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $csvPath = $this->createSampleCsv('statement_308.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-01', 'Setoran Awal Infaq', '', '1.000.000,00', '73.125.396,20'],
             ['2026-03-05', 'Biaya Materai & Administrasi', '5.539,00', '', '73.119.857,20'],
@@ -247,7 +257,7 @@ class BankImportTest extends TestCase
 
         // 46082 is 2026-03-01 in Excel serial date format
         $xlsxPath = $this->createSampleXlsx('statement_308.xlsx', 'REKAP REK GIRO 308', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             [46082, 'Bunga Tabungan BRI', '', 150000, 72275396.20],
             [46083, 'Pajak Bunga Bank', 30000, '', 72245396.20],
@@ -287,7 +297,7 @@ class BankImportTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $csvPath = $this->createSampleCsv('statement_semantics.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-10', 'Setoran Pembayaran Madrasah', '', '852.000,00', '1.000.000,00'],
             ['2026-03-11', 'Penarikan Kas Operasional', '250.000,00', '', '750.000,00'],
@@ -318,7 +328,7 @@ class BankImportTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $csvPath = $this->createSampleCsv('file_original.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-01', 'Transaksi Row 1', '', '100.000,00', '100.000,00'],
             ['2026-03-02', 'Transaksi Row 2', '20.000,00', '', '80.000,00'],
@@ -347,7 +357,7 @@ class BankImportTest extends TestCase
 
         // Sub-test 4b: New file with 2 old rows and 2 new rows
         $overlappingCsv = $this->createSampleCsv('file_overlap.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-01', 'Transaksi Row 1', '', '100.000,00', '100.000,00'], // Old (skip)
             ['2026-03-02', 'Transaksi Row 2', '20.000,00', '', '80.000,00'],  // Old (skip)
@@ -382,7 +392,7 @@ class BankImportTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $csvPath = $this->createSampleCsv('same_day_twins.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-15', 'BIAYA ADM BANK BRI', '2.500,00', '', '97.500,00'],
             ['2026-03-15', 'BIAYA ADM BANK BRI', '2.500,00', '', '95.000,00'], // Identical amount, desc, date
@@ -413,7 +423,7 @@ class BankImportTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $csvPath = $this->createSampleCsv('audit_sample.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-20', 'Dana BOS Batch 1', '', '50.000.000,00', '50.000.000,00'],
         ]);
@@ -453,7 +463,7 @@ class BankImportTest extends TestCase
 
         // Row 1: Saldo 100.000, +50.000 => Saldo seharusnya 150.000, tapi bank reported 180.000! (Gap 30.000)
         $csvPath = $this->createSampleCsv('discrepancy_statement.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-01', 'Setoran 1', '', '100.000,00', '100.000,00'],
             ['2026-03-02', 'Setoran 2', '', '50.000,00', '180.000,00'],
@@ -484,7 +494,7 @@ class BankImportTest extends TestCase
         $miDarwata = Counterparty::where('code', 'MI-DARWATA-01')->firstOrFail();
 
         $csvPath = $this->createSampleCsv('cp_resolution.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-05', 'BIAYA ADM BANK BRI MARET', '12.000,00', '', '1.000.000,00'],
             ['2026-03-06', 'SETORAN DANA INFAQ DARI MI DARWATA SINDANGBARANG', '', '852.000,00', '1.852.000,00'],
@@ -509,7 +519,7 @@ class BankImportTest extends TestCase
 
         // 1. BRI Giro 308: Debet Rp5.539,00, Kredit Rp9.077.695,00
         $csv308 = $this->createSampleCsv('golden_308.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-01', 'Setoran Penerimaan Giro 308', '', '9.077.695,00', '81.203.091,20'],
             ['2026-03-02', 'Beban Administrasi Buku Cek 308', '5.539,00', '', '81.197.552,20'],
@@ -528,7 +538,7 @@ class BankImportTest extends TestCase
 
         // 2. BRI Giro 304: Debet Rp124.258.949,00, Kredit Rp101.846.004,00
         $csv304 = $this->createSampleCsv('golden_304.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-05', 'Penerimaan Piutang & Setoran Giro 304', '', '101.846.004,00', '571.622.289,00'],
             ['2026-03-10', 'Pencairan Operasional & Transfer Giro 304', '124.258.949,00', '', '447.363.340,00'],
@@ -547,7 +557,7 @@ class BankImportTest extends TestCase
 
         // 3. BRI Tabungan 538: Debet Rp61.193,00, Kredit Rp109.362.464,00
         $csv538 = $this->createSampleCsv('golden_538.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-15', 'Penerimaan Setoran Tabungan 538', '', '109.362.464,00', '681.318.120,80'],
             ['2026-03-20', 'Pajak & Biaya Tabungan 538', '61.193,00', '', '681.256.927,80'],
@@ -574,7 +584,7 @@ class BankImportTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $csvPath = $this->createSampleCsv('tenant_a_stmt.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-01', 'Setoran Rahasia Org A', '', '1.000.000,00', '1.000.000,00'],
         ]);
@@ -609,7 +619,7 @@ class BankImportTest extends TestCase
         TenantContext::setTenantId($this->orgA->id);
 
         $csvPath = $this->createSampleCsv('resilience_sample.csv', [
-            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo',
         ], [
             ['2026-03-01', 'Baris Valid 1', '', '100.000,00', '100.000,00'],
             ['TANGGAL_KORUP', 'Baris Error Tanggal', '', '50.000,00', '150.000,00'], // Corrupt date

@@ -6,6 +6,9 @@ use App\Domain\Accounting\Models\Account;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\TenantContext;
 use App\Models\User;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -15,17 +18,21 @@ class AccountingApiTest extends TestCase
     use RefreshDatabase;
 
     private Organization $org;
+
     private User $admin;
+
     private User $operator;
+
     private Account $accKas;
+
     private Account $accBeban;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
 
         $this->org = Organization::where('code', 'LP-MAARIF-CLP')->first();
         TenantContext::setTenantId($this->org->id);

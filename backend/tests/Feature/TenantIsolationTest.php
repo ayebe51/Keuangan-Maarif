@@ -16,8 +16,11 @@ class TenantIsolationTest extends TestCase
     use RefreshDatabase;
 
     protected Organization $orgA;
+
     protected Organization $orgB;
+
     protected User $userA;
+
     protected User $userB;
 
     protected function setUp(): void
@@ -138,7 +141,7 @@ class TenantIsolationTest extends TestCase
         Sanctum::actingAs($this->userA);
 
         // User A trying to access API by passing X-Organization-ID of Org B
-        $response = $this->withHeader('X-Organization-ID', (string)$this->orgB->id)
+        $response = $this->withHeader('X-Organization-ID', (string) $this->orgB->id)
             ->getJson('/api/v1/auth/me');
 
         $response->assertStatus(403);

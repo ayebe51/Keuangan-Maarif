@@ -11,7 +11,7 @@ class RequireTenantMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (!TenantContext::hasTenant()) {
+        if (! TenantContext::hasTenant()) {
             return response()->json([
                 'message' => 'Konteks organisasi (tenant) wajib ditentukan untuk operasi ini. Harap sertakan header X-Organization-ID atau login dengan user organisasi.',
             ], 400);

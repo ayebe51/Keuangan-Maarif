@@ -14,7 +14,7 @@ return new class extends Migration
                 ->after('currency')
                 ->constrained('accounts')
                 ->nullOnDelete();
-            
+
             $table->index(['organization_id', 'account_id']);
         });
     }

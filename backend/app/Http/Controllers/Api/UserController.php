@@ -3,14 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Audit\Services\AuditService;
-use App\Domain\Organization\Models\Role;
 use App\Domain\Organization\Services\TenantContext;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
@@ -20,7 +18,7 @@ class UserController extends Controller
 
         $query = User::with(['organization', 'roles']);
 
-        if (!$currentUser->isSuperAdmin()) {
+        if (! $currentUser->isSuperAdmin()) {
             $query->where('organization_id', $currentUser->organization_id);
         } elseif (TenantContext::hasTenant()) {
             $query->where('organization_id', TenantContext::getTenantId());
@@ -39,7 +37,7 @@ class UserController extends Controller
 
         $user = User::with(['organization', 'roles.permissions'])->findOrFail($id);
 
-        if (!$currentUser->isSuperAdmin() && (int)$currentUser->organization_id !== (int)$user->organization_id) {
+        if (! $currentUser->isSuperAdmin() && (int) $currentUser->organization_id !== (int) $user->organization_id) {
             return response()->json([
                 'message' => 'Akses ditolak: Anda tidak memiliki izin melihat user organisasi lain.',
             ], 403);
@@ -82,7 +80,7 @@ class UserController extends Controller
             'is_active' => $validated['is_active'] ?? true,
         ]);
 
-        if (!empty($validated['roles'])) {
+        if (! empty($validated['roles'])) {
             $user->syncRoles($validated['roles']);
         }
 
@@ -91,7 +89,7 @@ class UserController extends Controller
             modelType: User::class,
             modelId: $user->id,
             newValues: $user->toArray(),
-            notes: 'Pembuatan user baru: ' . $user->email,
+            notes: 'Pembuatan user baru: '.$user->email,
             organizationId: $targetOrgId
         );
 
@@ -106,7 +104,7 @@ class UserController extends Controller
         $currentUser = $request->user();
         $user = User::findOrFail($id);
 
-        if (!$currentUser->isSuperAdmin() && (int)$currentUser->organization_id !== (int)$user->organization_id) {
+        if (! $currentUser->isSuperAdmin() && (int) $currentUser->organization_id !== (int) $user->organization_id) {
             return response()->json([
                 'message' => 'Akses ditolak: Anda tidak memiliki izin mengedit user organisasi lain.',
             ], 403);
@@ -114,7 +112,7 @@ class UserController extends Controller
 
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
-            'email' => ['sometimes', 'string', 'email', 'max:255', 'unique:users,email,' . $user->id],
+            'email' => ['sometimes', 'string', 'email', 'max:255', 'unique:users,email,'.$user->id],
             'password' => ['nullable', 'string', 'min:8'],
             'phone' => ['nullable', 'string', 'max:20'],
             'is_active' => ['nullable', 'boolean'],
@@ -130,7 +128,7 @@ class UserController extends Controller
         if (isset($validated['email'])) {
             $user->email = $validated['email'];
         }
-        if (!empty($validated['password'])) {
+        if (! empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);
         }
         if (array_key_exists('phone', $validated)) {
@@ -152,7 +150,7 @@ class UserController extends Controller
             modelId: $user->id,
             oldValues: $oldValues,
             newValues: $user->toArray(),
-            notes: 'Update data user: ' . $user->email,
+            notes: 'Update data user: '.$user->email,
             organizationId: $user->organization_id
         );
 
@@ -167,13 +165,13 @@ class UserController extends Controller
         $currentUser = $request->user();
         $user = User::findOrFail($id);
 
-        if (!$currentUser->isSuperAdmin() && (int)$currentUser->organization_id !== (int)$user->organization_id) {
+        if (! $currentUser->isSuperAdmin() && (int) $currentUser->organization_id !== (int) $user->organization_id) {
             return response()->json([
                 'message' => 'Akses ditolak: Anda tidak memiliki izin menghapus user organisasi lain.',
             ], 403);
         }
 
-        if ((int)$currentUser->id === (int)$user->id) {
+        if ((int) $currentUser->id === (int) $user->id) {
             return response()->json([
                 'message' => 'Akses ditolak: Anda tidak dapat menghapus akun Anda sendiri.',
             ], 422);
@@ -187,7 +185,7 @@ class UserController extends Controller
             modelType: User::class,
             modelId: $user->id,
             oldValues: $oldValues,
-            notes: 'Penghapusan user: ' . $user->email,
+            notes: 'Penghapusan user: '.$user->email,
             organizationId: $user->organization_id
         );
 

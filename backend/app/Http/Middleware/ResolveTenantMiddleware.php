@@ -18,11 +18,27 @@ class ResolveTenantMiddleware
         $user = $request->user();
 
         if ($user) {
+            // Hardening: Inactive user rejected immediately on server-side
+            if (! $user->is_active) {
+                return response()->json([
+                    'message' => 'Akun Anda telah dinonaktifkan. Silakan hubungi administrator.',
+                    'error' => 'ACCOUNT_INACTIVE',
+                ], 403);
+            }
+
+            // Hardening: Reject users whose organization is deactivated (except superadmin)
+            if (! $user->isSuperAdmin() && $user->organization && ! $user->organization->is_active) {
+                return response()->json([
+                    'message' => 'Organisasi Anda tidak aktif.',
+                    'error' => 'ORGANIZATION_INACTIVE',
+                ], 403);
+            }
+
             $headerOrgId = $request->header('X-Organization-ID') ?? $request->input('organization_id');
 
             if ($user->isSuperAdmin()) {
                 if ($headerOrgId !== null && is_numeric($headerOrgId)) {
-                    $org = Organization::find((int)$headerOrgId);
+                    $org = Organization::find((int) $headerOrgId);
                     if ($org) {
                         TenantContext::setTenant($org);
                     } else {
@@ -31,16 +47,16 @@ class ResolveTenantMiddleware
                         ], 404);
                     }
                 } elseif ($user->organization_id) {
-                    TenantContext::setTenantId((int)$user->organization_id);
+                    TenantContext::setTenantId((int) $user->organization_id);
                 } else {
                     // Super admin without specific organization bypasses scoping by default
                     TenantContext::setBypassScoping(true);
                 }
             } else {
                 // Non-superadmin user is strictly bound to their organization
-                $userOrgId = (int)$user->organization_id;
+                $userOrgId = (int) $user->organization_id;
 
-                if ($headerOrgId !== null && (int)$headerOrgId !== $userOrgId) {
+                if ($headerOrgId !== null && (int) $headerOrgId !== $userOrgId) {
                     throw new CrossTenantViolationException(
                         'Akses ditolak: Anda tidak memiliki izin untuk mengakses data organisasi lain.'
                     );
