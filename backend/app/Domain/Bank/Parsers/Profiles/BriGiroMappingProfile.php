@@ -13,17 +13,25 @@ class BriGiroMappingProfile implements StatementMappingProfileInterface
 
     public function matchHeaders(array $headers): bool
     {
-        $normalized = array_map(fn($h) => strtolower(trim((string)$h)), $headers);
+        $normalized = array_map(fn ($h) => strtolower(trim((string) $h)), $headers);
         $hasDate = false;
         $hasDesc = false;
         $hasDebet = false;
         $hasKredit = false;
 
         foreach ($normalized as $h) {
-            if (str_contains($h, 'tgl') || str_contains($h, 'tanggal') || str_contains($h, 'date')) $hasDate = true;
-            if (str_contains($h, 'ket') || str_contains($h, 'uraian') || str_contains($h, 'deskripsi')) $hasDesc = true;
-            if (str_contains($h, 'deb') || str_contains($h, 'keluar')) $hasDebet = true;
-            if (str_contains($h, 'kre') || str_contains($h, 'masuk')) $hasKredit = true;
+            if (str_contains($h, 'tgl') || str_contains($h, 'tanggal') || str_contains($h, 'date')) {
+                $hasDate = true;
+            }
+            if (str_contains($h, 'ket') || str_contains($h, 'uraian') || str_contains($h, 'deskripsi')) {
+                $hasDesc = true;
+            }
+            if (str_contains($h, 'deb') || str_contains($h, 'keluar')) {
+                $hasDebet = true;
+            }
+            if (str_contains($h, 'kre') || str_contains($h, 'masuk')) {
+                $hasKredit = true;
+            }
         }
 
         return $hasDate && ($hasDesc || true) && ($hasDebet || $hasKredit);
@@ -41,9 +49,9 @@ class BriGiroMappingProfile implements StatementMappingProfileInterface
         $reference = null;
 
         // If named headers exist
-        if (!empty($headers)) {
+        if (! empty($headers)) {
             foreach ($headers as $idx => $header) {
-                $h = strtolower(trim((string)$header));
+                $h = strtolower(trim((string) $header));
                 $val = $row[$idx] ?? ($row[$header] ?? null);
 
                 if (str_contains($h, 'tgl') || str_contains($h, 'tanggal') || str_contains($h, 'date')) {
@@ -64,11 +72,21 @@ class BriGiroMappingProfile implements StatementMappingProfileInterface
 
         // Positional fallback if indices are numeric:
         $indexed = array_values($row);
-        if ($date === null && isset($indexed[0])) $date = $indexed[0];
-        if ($description === null && isset($indexed[1])) $description = $indexed[1];
-        if ($debit === null && isset($indexed[2])) $debit = $indexed[2];
-        if ($credit === null && isset($indexed[3])) $credit = $indexed[3];
-        if ($balance === null && isset($indexed[4])) $balance = $indexed[4];
+        if ($date === null && isset($indexed[0])) {
+            $date = $indexed[0];
+        }
+        if ($description === null && isset($indexed[1])) {
+            $description = $indexed[1];
+        }
+        if ($debit === null && isset($indexed[2])) {
+            $debit = $indexed[2];
+        }
+        if ($credit === null && isset($indexed[3])) {
+            $credit = $indexed[3];
+        }
+        if ($balance === null && isset($indexed[4])) {
+            $balance = $indexed[4];
+        }
 
         return [
             'date' => $date,

@@ -7,8 +7,7 @@ interface BankStatementParserInterface
     /**
      * Parse the bank statement file into raw structured row arrays.
      *
-     * @param string $filePath
-     * @param array $options Optional settings (e.g. sheet_name, account_number, mapping_version)
+     * @param  array  $options  Optional settings (e.g. sheet_name, account_number, mapping_version)
      * @return array<int, array{
      *     source_file: string,
      *     source_sheet: ?string,

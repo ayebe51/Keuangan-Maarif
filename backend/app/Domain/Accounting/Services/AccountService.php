@@ -37,14 +37,14 @@ class AccountService
     private function buildBranch(array &$grouped, int $parentId): array
     {
         $branch = [];
-        if (!isset($grouped[$parentId])) {
+        if (! isset($grouped[$parentId])) {
             return $branch;
         }
 
         foreach ($grouped[$parentId] as $node) {
             $item = $node->toArray();
             $children = $this->buildBranch($grouped, $node->id);
-            if (!empty($children)) {
+            if (! empty($children)) {
                 $item['children'] = $children;
             } else {
                 $item['children'] = [];
@@ -60,10 +60,10 @@ class AccountService
         return DB::transaction(function () use ($data, $user) {
             $orgId = (int) $data['organization_id'];
 
-            if (!empty($data['parent_id'])) {
+            if (! empty($data['parent_id'])) {
                 $parent = Account::withoutGlobalScopes()->find($data['parent_id']);
-                if ($parent && (int)$parent->organization_id !== $orgId) {
-                    throw new CrossTenantViolationException("Parent account belongs to a different organization.");
+                if ($parent && (int) $parent->organization_id !== $orgId) {
+                    throw new CrossTenantViolationException('Parent account belongs to a different organization.');
                 }
             }
 
@@ -110,19 +110,19 @@ class AccountService
 
             if (array_key_exists('parent_id', $data) && $data['parent_id'] !== null) {
                 $parentId = (int) $data['parent_id'];
-                if ($parentId === (int)$account->id) {
-                    throw new InvalidArgumentException("Account cannot be its own parent.");
+                if ($parentId === (int) $account->id) {
+                    throw new InvalidArgumentException('Account cannot be its own parent.');
                 }
 
                 // Check descendants to prevent cycles
                 $descendantIds = $this->getDescendantIds($account->id);
                 if (in_array($parentId, $descendantIds, true)) {
-                    throw new InvalidArgumentException("Cannot set parent to an account that is already a descendant (circular hierarchy).");
+                    throw new InvalidArgumentException('Cannot set parent to an account that is already a descendant (circular hierarchy).');
                 }
 
                 $parent = Account::withoutGlobalScopes()->find($parentId);
-                if ($parent && (int)$parent->organization_id !== $orgId) {
-                    throw new CrossTenantViolationException("Parent account belongs to a different organization.");
+                if ($parent && (int) $parent->organization_id !== $orgId) {
+                    throw new CrossTenantViolationException('Parent account belongs to a different organization.');
                 }
             }
 
@@ -149,15 +149,15 @@ class AccountService
     {
         $account = Account::withoutGlobalScopes()->find($accountId);
 
-        if (!$account) {
+        if (! $account) {
             throw new InvalidArgumentException("Account with ID {$accountId} not found.");
         }
 
-        if ((int)$account->organization_id !== $organizationId) {
+        if ((int) $account->organization_id !== $organizationId) {
             throw new CrossTenantViolationException("Account {$account->code} does not belong to organization {$organizationId}.");
         }
 
-        if (!$account->is_postable) {
+        if (! $account->is_postable) {
             throw new NonPostableAccountException($account->code, $account->name);
         }
 

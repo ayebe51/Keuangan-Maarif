@@ -15,11 +15,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class BankAccount extends Model
 {
-    use HasFactory, BelongsToTenant, SoftDeletes;
+    use BelongsToTenant, HasFactory, SoftDeletes;
 
     public const TYPE_GIRO = 'giro';
+
     public const TYPE_SAVINGS = 'savings';
+
     public const TYPE_CURRENT = 'current';
+
     public const TYPE_CASH = 'cash';
 
     protected $table = 'bank_accounts';
@@ -46,7 +49,7 @@ class BankAccount extends Model
         static::saving(function (BankAccount $bankAccount) {
             if ($bankAccount->isDirty('opening_balance') || isset($bankAccount->getAttributes()['opening_balance'])) {
                 throw new OpeningBalanceConfigurationException(
-                    "Opening balance cannot be set directly on BankAccount. Opening balance MUST flow through OpeningBalanceSource -> JournalEntry -> JournalLine."
+                    'Opening balance cannot be set directly on BankAccount. Opening balance MUST flow through OpeningBalanceSource -> JournalEntry -> JournalLine.'
                 );
             }
         });

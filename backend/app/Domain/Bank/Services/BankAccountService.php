@@ -25,7 +25,7 @@ class BankAccountService
             // Invariant guard against opening_balance
             if (array_key_exists('opening_balance', $data)) {
                 throw new OpeningBalanceConfigurationException(
-                    "Opening balance cannot be set directly on BankAccount. Opening balance MUST flow through OpeningBalanceSource -> JournalEntry -> JournalLine."
+                    'Opening balance cannot be set directly on BankAccount. Opening balance MUST flow through OpeningBalanceSource -> JournalEntry -> JournalLine.'
                 );
             }
 
@@ -83,12 +83,12 @@ class BankAccountService
             $orgId = (int) $bankAccount->organization_id;
 
             if (array_key_exists('organization_id', $data) && (int) $data['organization_id'] !== $orgId) {
-                throw new CrossTenantViolationException("Cannot change organization of bank account.");
+                throw new CrossTenantViolationException('Cannot change organization of bank account.');
             }
 
             if (array_key_exists('opening_balance', $data)) {
                 throw new OpeningBalanceConfigurationException(
-                    "Opening balance cannot be set directly on BankAccount. Opening balance MUST flow through OpeningBalanceSource -> JournalEntry -> JournalLine."
+                    'Opening balance cannot be set directly on BankAccount. Opening balance MUST flow through OpeningBalanceSource -> JournalEntry -> JournalLine.'
                 );
             }
 

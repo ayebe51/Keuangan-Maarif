@@ -13,13 +13,17 @@ class BriTabunganMappingProfile implements StatementMappingProfileInterface
 
     public function matchHeaders(array $headers): bool
     {
-        $normalized = array_map(fn($h) => strtolower(trim((string)$h)), $headers);
+        $normalized = array_map(fn ($h) => strtolower(trim((string) $h)), $headers);
         $hasNo = false;
         $hasDate = false;
 
         foreach ($normalized as $h) {
-            if ($h === 'no' || $h === 'no.' || str_contains($h, 'nomor')) $hasNo = true;
-            if (str_contains($h, 'tgl') || str_contains($h, 'tanggal')) $hasDate = true;
+            if ($h === 'no' || $h === 'no.' || str_contains($h, 'nomor')) {
+                $hasNo = true;
+            }
+            if (str_contains($h, 'tgl') || str_contains($h, 'tanggal')) {
+                $hasDate = true;
+            }
         }
 
         return $hasNo && $hasDate;
@@ -34,9 +38,9 @@ class BriTabunganMappingProfile implements StatementMappingProfileInterface
         $balance = null;
         $reference = null;
 
-        if (!empty($headers)) {
+        if (! empty($headers)) {
             foreach ($headers as $idx => $header) {
-                $h = strtolower(trim((string)$header));
+                $h = strtolower(trim((string) $header));
                 $val = $row[$idx] ?? ($row[$header] ?? null);
 
                 if (str_contains($h, 'tgl') || str_contains($h, 'tanggal') || str_contains($h, 'date')) {
@@ -57,11 +61,21 @@ class BriTabunganMappingProfile implements StatementMappingProfileInterface
 
         // Positional fallback when No is at 0:
         $indexed = array_values($row);
-        if ($date === null && isset($indexed[1])) $date = $indexed[1];
-        if ($description === null && isset($indexed[2])) $description = $indexed[2];
-        if ($debit === null && isset($indexed[3])) $debit = $indexed[3];
-        if ($credit === null && isset($indexed[4])) $credit = $indexed[4];
-        if ($balance === null && isset($indexed[5])) $balance = $indexed[5];
+        if ($date === null && isset($indexed[1])) {
+            $date = $indexed[1];
+        }
+        if ($description === null && isset($indexed[2])) {
+            $description = $indexed[2];
+        }
+        if ($debit === null && isset($indexed[3])) {
+            $debit = $indexed[3];
+        }
+        if ($credit === null && isset($indexed[4])) {
+            $credit = $indexed[4];
+        }
+        if ($balance === null && isset($indexed[5])) {
+            $balance = $indexed[5];
+        }
 
         return [
             'date' => $date,

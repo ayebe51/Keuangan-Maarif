@@ -8,7 +8,7 @@ class UnsupportedBankFormatException extends Exception
 {
     public function __construct(
         public readonly string $format,
-        string $message = ""
+        string $message = ''
     ) {
         parent::__construct(
             $message ?: "Unsupported bank statement format: '{$format}'."

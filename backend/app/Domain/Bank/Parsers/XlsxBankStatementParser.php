@@ -20,22 +20,22 @@ class XlsxBankStatementParser implements BankStatementParserInterface
     public function __construct()
     {
         $this->profiles = [
-            new BukuKasMappingProfile(),
-            new BriTabunganMappingProfile(),
-            new BriGiroMappingProfile(),
-            new GenericCsvMappingProfile(),
+            new BukuKasMappingProfile,
+            new BriTabunganMappingProfile,
+            new BriGiroMappingProfile,
+            new GenericCsvMappingProfile,
         ];
     }
 
     public function parse(string $filePath, array $options = []): array
     {
-        if (!file_exists($filePath) || !is_readable($filePath)) {
-            throw new InvalidBankStatementFormatException(basename($filePath), "File does not exist or is not readable.");
+        if (! file_exists($filePath) || ! is_readable($filePath)) {
+            throw new InvalidBankStatementFormatException(basename($filePath), 'File does not exist or is not readable.');
         }
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         if ($zip->open($filePath) !== true) {
-            throw new InvalidBankStatementFormatException(basename($filePath), "Could not open file as valid OpenXML XLSX archive.");
+            throw new InvalidBankStatementFormatException(basename($filePath), 'Could not open file as valid OpenXML XLSX archive.');
         }
 
         try {
@@ -50,8 +50,8 @@ class XlsxBankStatementParser implements BankStatementParserInterface
             }
 
             $sheetXml = simplexml_load_string($sheetXmlContent);
-            if ($sheetXml === false || !isset($sheetXml->sheetData)) {
-                throw new InvalidBankStatementFormatException(basename($filePath), "Invalid worksheet XML structure.");
+            if ($sheetXml === false || ! isset($sheetXml->sheetData)) {
+                throw new InvalidBankStatementFormatException(basename($filePath), 'Invalid worksheet XML structure.');
             }
 
             $rawRows = $this->extractRowsFromSheet($sheetXml, $sharedStrings);
@@ -64,7 +64,7 @@ class XlsxBankStatementParser implements BankStatementParserInterface
             $headerRowIdx = null;
             foreach ($rawRows as $rIdx => $cells) {
                 if ($this->looksLikeHeader($cells)) {
-                    $headers = array_map(fn($c) => trim((string)$c), $cells);
+                    $headers = array_map(fn ($c) => trim((string) $c), $cells);
                     $headerRowIdx = $rIdx;
                     break;
                 }
@@ -75,16 +75,20 @@ class XlsxBankStatementParser implements BankStatementParserInterface
             $result = [];
 
             foreach ($rawRows as $rIdx => $cells) {
-                if ($headerRowIdx !== null && $rIdx <= $headerRowIdx) continue;
+                if ($headerRowIdx !== null && $rIdx <= $headerRowIdx) {
+                    continue;
+                }
 
-                $nonEmpty = array_filter($cells, fn($c) => trim((string)$c) !== '');
-                if (empty($nonEmpty)) continue;
+                $nonEmpty = array_filter($cells, fn ($c) => trim((string) $c) !== '');
+                if (empty($nonEmpty)) {
+                    continue;
+                }
 
                 $mapped = $profile->mapRow($cells, $headers);
 
                 // Skip summary/total rows
-                $firstCell = strtolower(trim((string)($cells[0] ?? '')));
-                $descCell = strtolower(trim((string)($mapped['description'] ?? '')));
+                $firstCell = strtolower(trim((string) ($cells[0] ?? '')));
+                $descCell = strtolower(trim((string) ($mapped['description'] ?? '')));
                 if (str_starts_with($firstCell, 'total') || str_starts_with($firstCell, 'jumlah') ||
                     str_starts_with($descCell, 'total') || str_starts_with($descCell, 'jumlah') ||
                     str_starts_with($firstCell, 'saldo akhir') || str_starts_with($descCell, 'saldo akhir')) {
@@ -135,11 +139,11 @@ class XlsxBankStatementParser implements BankStatementParserInterface
 
         foreach ($xml->si as $si) {
             if (isset($si->t)) {
-                $strings[] = (string)$si->t;
+                $strings[] = (string) $si->t;
             } elseif (isset($si->r)) {
                 $str = '';
                 foreach ($si->r as $r) {
-                    $str .= (string)$r->t;
+                    $str .= (string) $r->t;
                 }
                 $strings[] = $str;
             } else {
@@ -168,10 +172,10 @@ class XlsxBankStatementParser implements BankStatementParserInterface
         $relMap = [];
         if ($relsXml && isset($relsXml->Relationship)) {
             foreach ($relsXml->Relationship as $rel) {
-                $id = (string)$rel['Id'];
-                $target = (string)$rel['Target'];
-                if (!str_starts_with($target, 'xl/')) {
-                    $target = 'xl/' . ltrim($target, '/');
+                $id = (string) $rel['Id'];
+                $target = (string) $rel['Target'];
+                if (! str_starts_with($target, 'xl/')) {
+                    $target = 'xl/'.ltrim($target, '/');
                 }
                 $relMap[$id] = $target;
             }
@@ -180,9 +184,9 @@ class XlsxBankStatementParser implements BankStatementParserInterface
         $sheets = [];
         if (isset($workbookXml->sheets->sheet)) {
             foreach ($workbookXml->sheets->sheet as $sheet) {
-                $name = (string)$sheet['name'];
-                $sheetId = (string)$sheet['sheetId'];
-                $rId = (string)$sheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships')['id'];
+                $name = (string) $sheet['name'];
+                $sheetId = (string) $sheet['sheetId'];
+                $rId = (string) $sheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships')['id'];
                 $targetFile = $relMap[$rId] ?? "xl/worksheets/sheet{$sheetId}.xml";
 
                 $sheets[] = [
@@ -197,8 +201,8 @@ class XlsxBankStatementParser implements BankStatementParserInterface
         }
 
         // 1. Check explicit sheet_name option
-        if (!empty($options['sheet_name'])) {
-            $targetName = strtolower(trim((string)$options['sheet_name']));
+        if (! empty($options['sheet_name'])) {
+            $targetName = strtolower(trim((string) $options['sheet_name']));
             foreach ($sheets as $s) {
                 if (strtolower($s['name']) === $targetName || str_contains(strtolower($s['name']), $targetName)) {
                     return $s;
@@ -207,8 +211,8 @@ class XlsxBankStatementParser implements BankStatementParserInterface
         }
 
         // 2. Check account_number / account_name option (e.g. 308, 304, 538, Kas)
-        if (!empty($options['account_number'])) {
-            $accountNum = (string)$options['account_number'];
+        if (! empty($options['account_number'])) {
+            $accountNum = (string) $options['account_number'];
             // Extract key numbers (e.g. 308, 304, 538)
             preg_match('/(\d{3,4})/', $accountNum, $m);
             $keyDigits = $m[1] ?? '';
@@ -222,7 +226,7 @@ class XlsxBankStatementParser implements BankStatementParserInterface
             }
         }
 
-        if (!empty($options['account_type']) && strtolower((string)$options['account_type']) === 'cash') {
+        if (! empty($options['account_type']) && strtolower((string) $options['account_type']) === 'cash') {
             foreach ($sheets as $s) {
                 if (str_contains(strtolower($s['name']), 'kas')) {
                     return $s;
@@ -242,20 +246,20 @@ class XlsxBankStatementParser implements BankStatementParserInterface
         $rows = [];
 
         foreach ($sheetXml->sheetData->row as $row) {
-            $rowNum = (int)$row['r'];
+            $rowNum = (int) $row['r'];
             $cells = [];
 
             foreach ($row->c as $cell) {
-                $cellRef = (string)$cell['r'];
+                $cellRef = (string) $cell['r'];
                 $colIndex = $this->columnLetterToIndex($cellRef);
-                $type = (string)$cell['t'];
-                $value = isset($cell->v) ? (string)$cell->v : '';
+                $type = (string) $cell['t'];
+                $value = isset($cell->v) ? (string) $cell->v : '';
 
                 if ($type === 's' && is_numeric($value)) {
-                    $strIdx = (int)$value;
+                    $strIdx = (int) $value;
                     $actualVal = $sharedStrings[$strIdx] ?? '';
                 } elseif ($type === 'inlineStr' && isset($cell->is->t)) {
-                    $actualVal = (string)$cell->is->t;
+                    $actualVal = (string) $cell->is->t;
                 } else {
                     $actualVal = $value;
                 }
@@ -264,7 +268,7 @@ class XlsxBankStatementParser implements BankStatementParserInterface
             }
 
             // Fill missing gaps up to highest index
-            if (!empty($cells)) {
+            if (! empty($cells)) {
                 $maxCol = max(array_keys($cells));
                 $filled = [];
                 for ($i = 0; $i <= $maxCol; $i++) {
@@ -286,33 +290,36 @@ class XlsxBankStatementParser implements BankStatementParserInterface
         for ($i = 0; $i < $len; $i++) {
             $index = $index * 26 + (ord($colLetters[$i]) - 64);
         }
+
         return $index - 1; // 0-based
     }
 
     protected function looksLikeHeader(array $cells): bool
     {
-        $normalized = array_map(fn($c) => strtolower(trim((string)$c)), $cells);
+        $normalized = array_map(fn ($c) => strtolower(trim((string) $c)), $cells);
         foreach ($normalized as $c) {
             if (in_array($c, ['tanggal', 'tgl', 'date', 'keterangan', 'uraian', 'debet', 'kredit', 'penerimaan', 'pengeluaran', 'saldo'])) {
                 return true;
             }
         }
+
         return false;
     }
 
     protected function normalizeDateValue(mixed $val): ?string
     {
-        if ($val === null || trim((string)$val) === '') {
+        if ($val === null || trim((string) $val) === '') {
             return null;
         }
 
-        $str = trim((string)$val);
+        $str = trim((string) $val);
 
         // Check if numeric Excel serial date (e.g. 46082 for March 2026)
-        if (is_numeric($str) && (float)$str > 30000 && (float)$str < 70000) {
+        if (is_numeric($str) && (float) $str > 30000 && (float) $str < 70000) {
             // Excel epoch is 1899-12-30 (due to 1900 leap year bug)
-            $days = (int)$str;
+            $days = (int) $str;
             $seconds = ($days - 25569) * 86400;
+
             return gmdate('Y-m-d', $seconds);
         }
 
@@ -331,13 +338,13 @@ class XlsxBankStatementParser implements BankStatementParserInterface
 
         $lowerSheet = strtolower($sheetName);
         if (str_contains($lowerSheet, 'kas')) {
-            return new BukuKasMappingProfile();
+            return new BukuKasMappingProfile;
         }
         if (str_contains($lowerSheet, 'tabungan')) {
-            return new BriTabunganMappingProfile();
+            return new BriTabunganMappingProfile;
         }
         if (str_contains($lowerSheet, 'giro')) {
-            return new BriGiroMappingProfile();
+            return new BriGiroMappingProfile;
         }
 
         foreach ($this->profiles as $p) {
@@ -346,6 +353,6 @@ class XlsxBankStatementParser implements BankStatementParserInterface
             }
         }
 
-        return new GenericCsvMappingProfile();
+        return new GenericCsvMappingProfile;
     }
 }

@@ -15,8 +15,8 @@ class BankStatementParserFactory
         $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
 
         return match ($extension) {
-            'csv', 'txt' => new CsvBankStatementParser(),
-            'xlsx' => new XlsxBankStatementParser(),
+            'csv', 'txt' => new CsvBankStatementParser,
+            'xlsx' => new XlsxBankStatementParser,
             default => throw new UnsupportedBankFormatException($extension),
         };
     }

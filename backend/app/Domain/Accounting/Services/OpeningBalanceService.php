@@ -28,10 +28,10 @@ class OpeningBalanceService
         return DB::transaction(function () use ($data, $user) {
             $orgId = (int) $data['organization_id'];
 
-            if (!empty($data['bank_account_id'])) {
+            if (! empty($data['bank_account_id'])) {
                 $bank = DB::table('bank_accounts')->where('id', $data['bank_account_id'])->first();
-                if (!$bank || (int)$bank->organization_id !== $orgId) {
-                    throw new CrossTenantViolationException("Bank Account belongs to a different organization.");
+                if (! $bank || (int) $bank->organization_id !== $orgId) {
+                    throw new CrossTenantViolationException('Bank Account belongs to a different organization.');
                 }
             }
 
@@ -39,12 +39,12 @@ class OpeningBalanceService
             $period = $this->fiscalPeriodService->ensureDateInOpenPeriod($effectiveDate, $orgId);
 
             $amount = Money::of($data['amount']);
-            if (!$amount->isPositive()) {
-                throw new InvalidArgumentException("Opening balance amount must be strictly greater than zero.");
+            if (! $amount->isPositive()) {
+                throw new InvalidArgumentException('Opening balance amount must be strictly greater than zero.');
             }
 
             $direction = strtolower($data['direction'] ?? OpeningBalanceSource::DIRECTION_DEBIT);
-            if (!in_array($direction, [OpeningBalanceSource::DIRECTION_DEBIT, OpeningBalanceSource::DIRECTION_CREDIT], true)) {
+            if (! in_array($direction, [OpeningBalanceSource::DIRECTION_DEBIT, OpeningBalanceSource::DIRECTION_CREDIT], true)) {
                 throw new InvalidArgumentException("Invalid direction '{$direction}'. Must be 'debit' or 'credit'.");
             }
 
@@ -94,20 +94,20 @@ class OpeningBalanceService
                     (string) $source->bank_account_id
                 );
 
-                if (!$targetAccount) {
+                if (! $targetAccount) {
                     throw new OpeningBalanceConfigurationException("No COA mapping found for bank account ID {$source->bank_account_id}.");
                 }
             } elseif ($explicitAccountId) {
                 $targetAccount = $this->accountService->ensurePostable($explicitAccountId, $orgId);
             }
 
-            if (!$targetAccount) {
+            if (! $targetAccount) {
                 throw new OpeningBalanceConfigurationException("No target COA account resolved for opening balance source #{$source->id}.");
             }
 
             // 2. Resolve Opening Balance Equity Counterpart (Account 3100)
             $equityCounterpart = $this->accountService->resolveAccount($orgId, 'opening_balance', 'equity_counterpart');
-            if (!$equityCounterpart) {
+            if (! $equityCounterpart) {
                 $equityCounterpart = Account::withoutGlobalScopes()
                     ->where('organization_id', $orgId)
                     ->where('code', '3100')
@@ -115,8 +115,8 @@ class OpeningBalanceService
                     ->first();
             }
 
-            if (!$equityCounterpart) {
-                throw new OpeningBalanceConfigurationException("Opening Balance Equity counterpart account (Account 3100) is not configured.");
+            if (! $equityCounterpart) {
+                throw new OpeningBalanceConfigurationException('Opening Balance Equity counterpart account (Account 3100) is not configured.');
             }
 
             // 3. Build Mirrored Lines according to direction (AT-016 & AT-017)

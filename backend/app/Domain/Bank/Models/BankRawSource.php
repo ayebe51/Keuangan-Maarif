@@ -11,11 +11,14 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class BankRawSource extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     public const STATUS_PENDING = 'pending';
+
     public const STATUS_NORMALIZED = 'normalized';
+
     public const STATUS_DUPLICATE = 'duplicate';
+
     public const STATUS_ERROR = 'error';
 
     protected $table = 'bank_raw_sources';

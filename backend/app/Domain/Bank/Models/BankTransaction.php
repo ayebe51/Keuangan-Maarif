@@ -10,6 +10,7 @@ use App\Domain\Classification\Models\ClassificationSuggestion;
 use App\Domain\Counterparty\Models\Counterparty;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Traits\BelongsToTenant;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BankTransaction extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'bank_transactions';
 
@@ -52,16 +53,16 @@ class BankTransaction extends Model
         'row_sequence' => 'integer',
     ];
 
-    protected function amount(): \Illuminate\Database\Eloquent\Casts\Attribute
+    protected function amount(): Attribute
     {
-        return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+        return Attribute::make(
             get: fn ($val) => number_format((float) ($val ?? 0), 2, '.', ''),
         );
     }
 
-    protected function balanceAfter(): \Illuminate\Database\Eloquent\Casts\Attribute
+    protected function balanceAfter(): Attribute
     {
-        return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+        return Attribute::make(
             get: fn ($val) => $val !== null ? number_format((float) $val, 2, '.', '') : null,
         );
     }

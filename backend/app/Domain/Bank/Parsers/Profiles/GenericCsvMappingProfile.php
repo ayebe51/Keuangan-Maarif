@@ -25,9 +25,9 @@ class GenericCsvMappingProfile implements StatementMappingProfileInterface
         $balance = null;
         $reference = null;
 
-        if (!empty($headers)) {
+        if (! empty($headers)) {
             foreach ($headers as $idx => $header) {
-                $h = strtolower(trim((string)$header));
+                $h = strtolower(trim((string) $header));
                 $val = $row[$idx] ?? ($row[$header] ?? null);
 
                 if (str_contains($h, 'date') || str_contains($h, 'tgl') || str_contains($h, 'tanggal')) {
@@ -47,11 +47,21 @@ class GenericCsvMappingProfile implements StatementMappingProfileInterface
         }
 
         $indexed = array_values($row);
-        if ($date === null && isset($indexed[0])) $date = $indexed[0];
-        if ($description === null && isset($indexed[1])) $description = $indexed[1];
-        if ($debit === null && isset($indexed[2])) $debit = $indexed[2];
-        if ($credit === null && isset($indexed[3])) $credit = $indexed[3];
-        if ($balance === null && isset($indexed[4])) $balance = $indexed[4];
+        if ($date === null && isset($indexed[0])) {
+            $date = $indexed[0];
+        }
+        if ($description === null && isset($indexed[1])) {
+            $description = $indexed[1];
+        }
+        if ($debit === null && isset($indexed[2])) {
+            $debit = $indexed[2];
+        }
+        if ($credit === null && isset($indexed[3])) {
+            $credit = $indexed[3];
+        }
+        if ($balance === null && isset($indexed[4])) {
+            $balance = $indexed[4];
+        }
 
         return [
             'date' => $date,

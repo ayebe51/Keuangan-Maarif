@@ -13,13 +13,17 @@ class BukuKasMappingProfile implements StatementMappingProfileInterface
 
     public function matchHeaders(array $headers): bool
     {
-        $normalized = array_map(fn($h) => strtolower(trim((string)$h)), $headers);
+        $normalized = array_map(fn ($h) => strtolower(trim((string) $h)), $headers);
         $hasPenerimaan = false;
         $hasPengeluaran = false;
 
         foreach ($normalized as $h) {
-            if (str_contains($h, 'penerimaan')) $hasPenerimaan = true;
-            if (str_contains($h, 'pengeluaran')) $hasPengeluaran = true;
+            if (str_contains($h, 'penerimaan')) {
+                $hasPenerimaan = true;
+            }
+            if (str_contains($h, 'pengeluaran')) {
+                $hasPengeluaran = true;
+            }
         }
 
         return $hasPenerimaan || $hasPengeluaran;
@@ -34,9 +38,9 @@ class BukuKasMappingProfile implements StatementMappingProfileInterface
         $balance = null;
         $reference = null;
 
-        if (!empty($headers)) {
+        if (! empty($headers)) {
             foreach ($headers as $idx => $header) {
-                $h = strtolower(trim((string)$header));
+                $h = strtolower(trim((string) $header));
                 $val = $row[$idx] ?? ($row[$header] ?? null);
 
                 if (str_contains($h, 'tgl') || str_contains($h, 'tanggal') || str_contains($h, 'date')) {
@@ -58,12 +62,24 @@ class BukuKasMappingProfile implements StatementMappingProfileInterface
         // Positional fallback:
         // Col 0: Tanggal | Col 1: No Bukti | Col 2: Uraian | Col 3: Penerimaan | Col 4: Pengeluaran | Col 5: Saldo
         $indexed = array_values($row);
-        if ($date === null && isset($indexed[0])) $date = $indexed[0];
-        if ($reference === null && isset($indexed[1])) $reference = $indexed[1];
-        if ($description === null && isset($indexed[2])) $description = $indexed[2];
-        if ($credit === null && isset($indexed[3])) $credit = $indexed[3];
-        if ($debit === null && isset($indexed[4])) $debit = $indexed[4];
-        if ($balance === null && isset($indexed[5])) $balance = $indexed[5];
+        if ($date === null && isset($indexed[0])) {
+            $date = $indexed[0];
+        }
+        if ($reference === null && isset($indexed[1])) {
+            $reference = $indexed[1];
+        }
+        if ($description === null && isset($indexed[2])) {
+            $description = $indexed[2];
+        }
+        if ($credit === null && isset($indexed[3])) {
+            $credit = $indexed[3];
+        }
+        if ($debit === null && isset($indexed[4])) {
+            $debit = $indexed[4];
+        }
+        if ($balance === null && isset($indexed[5])) {
+            $balance = $indexed[5];
+        }
 
         return [
             'date' => $date,

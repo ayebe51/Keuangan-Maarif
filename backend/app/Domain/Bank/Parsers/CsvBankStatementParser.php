@@ -18,22 +18,22 @@ class CsvBankStatementParser implements BankStatementParserInterface
     public function __construct()
     {
         $this->profiles = [
-            new BukuKasMappingProfile(),
-            new BriTabunganMappingProfile(),
-            new BriGiroMappingProfile(),
-            new GenericCsvMappingProfile(),
+            new BukuKasMappingProfile,
+            new BriTabunganMappingProfile,
+            new BriGiroMappingProfile,
+            new GenericCsvMappingProfile,
         ];
     }
 
     public function parse(string $filePath, array $options = []): array
     {
-        if (!file_exists($filePath) || !is_readable($filePath)) {
-            throw new InvalidBankStatementFormatException(basename($filePath), "File does not exist or is not readable.");
+        if (! file_exists($filePath) || ! is_readable($filePath)) {
+            throw new InvalidBankStatementFormatException(basename($filePath), 'File does not exist or is not readable.');
         }
 
         $content = file_get_contents($filePath);
         if ($content === false || trim($content) === '') {
-            throw new InvalidBankStatementFormatException(basename($filePath), "File is empty.");
+            throw new InvalidBankStatementFormatException(basename($filePath), 'File is empty.');
         }
 
         // Remove UTF-8 BOM if present
@@ -54,11 +54,13 @@ class CsvBankStatementParser implements BankStatementParserInterface
         // Find header row (first non-empty row that contains keyword like tgl, tanggal, date, etc.)
         foreach ($lines as $idx => $line) {
             $line = trim($line);
-            if ($line === '') continue;
+            if ($line === '') {
+                continue;
+            }
 
             $parsedLine = str_getcsv($line, $delimiter);
             if ($this->looksLikeHeader($parsedLine)) {
-                $headers = array_map(fn($h) => trim((string)$h), $parsedLine);
+                $headers = array_map(fn ($h) => trim((string) $h), $parsedLine);
                 $headerRowIdx = $idx;
                 break;
             }
@@ -72,20 +74,26 @@ class CsvBankStatementParser implements BankStatementParserInterface
 
         foreach ($lines as $lineIdx => $line) {
             $line = trim($line);
-            if ($line === '') continue;
-            if ($headerRowIdx !== null && $lineIdx <= $headerRowIdx) continue;
+            if ($line === '') {
+                continue;
+            }
+            if ($headerRowIdx !== null && $lineIdx <= $headerRowIdx) {
+                continue;
+            }
 
             $cells = str_getcsv($line, $delimiter);
             // Check if all cells are empty
-            $nonEmpty = array_filter($cells, fn($c) => trim((string)$c) !== '');
-            if (empty($nonEmpty)) continue;
+            $nonEmpty = array_filter($cells, fn ($c) => trim((string) $c) !== '');
+            if (empty($nonEmpty)) {
+                continue;
+            }
 
             $dataRowIdx++;
             $mapped = $profile->mapRow($cells, $headers);
 
             // Skip total/summary rows at bottom (e.g. "JUMLAH", "TOTAL", "SALDO AKHIR")
-            $firstCell = strtolower(trim((string)($cells[0] ?? '')));
-            $descCell = strtolower(trim((string)($mapped['description'] ?? '')));
+            $firstCell = strtolower(trim((string) ($cells[0] ?? '')));
+            $descCell = strtolower(trim((string) ($mapped['description'] ?? '')));
             if (str_starts_with($firstCell, 'total') || str_starts_with($firstCell, 'jumlah') ||
                 str_starts_with($descCell, 'total') || str_starts_with($descCell, 'jumlah')) {
                 continue;
@@ -134,12 +142,13 @@ class CsvBankStatementParser implements BankStatementParserInterface
 
     protected function looksLikeHeader(array $cells): bool
     {
-        $normalized = array_map(fn($c) => strtolower(trim((string)$c)), $cells);
+        $normalized = array_map(fn ($c) => strtolower(trim((string) $c)), $cells);
         foreach ($normalized as $c) {
             if (in_array($c, ['tanggal', 'tgl', 'date', 'keterangan', 'uraian', 'debet', 'kredit', 'penerimaan', 'pengeluaran', 'saldo'])) {
                 return true;
             }
         }
+
         return false;
     }
 
@@ -159,6 +168,6 @@ class CsvBankStatementParser implements BankStatementParserInterface
             }
         }
 
-        return new GenericCsvMappingProfile();
+        return new GenericCsvMappingProfile;
     }
 }

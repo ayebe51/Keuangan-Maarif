@@ -17,8 +17,6 @@ interface StatementMappingProfileInterface
     /**
      * Map a raw row into standardized keys: date, description, debit, credit, balance, reference.
      *
-     * @param array $row
-     * @param array $headers
      * @return array{
      *     date: mixed,
      *     description: mixed,

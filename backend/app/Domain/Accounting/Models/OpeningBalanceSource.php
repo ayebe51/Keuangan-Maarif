@@ -11,13 +11,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class OpeningBalanceSource extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     public const STATUS_PENDING = 'pending';
+
     public const STATUS_POSTED = 'posted';
+
     public const STATUS_ERROR = 'error';
 
     public const DIRECTION_DEBIT = 'debit';
+
     public const DIRECTION_CREDIT = 'credit';
 
     protected $table = 'opening_balance_sources';

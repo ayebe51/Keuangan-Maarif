@@ -37,12 +37,14 @@ final class Money implements Stringable
     public function add(Money $other): self
     {
         $result = bcadd($this->amount, $other->amount, 2);
+
         return new self($result);
     }
 
     public function subtract(Money $other): self
     {
         $result = bcsub($this->amount, $other->amount, 2);
+
         return new self($result);
     }
 
@@ -50,6 +52,7 @@ final class Money implements Stringable
     {
         $multStr = is_float($multiplier) ? sprintf('%.6f', $multiplier) : (string) $multiplier;
         $raw = bcmul($this->amount, $multStr, 6);
+
         return new self(self::roundHalfUp($raw, 2));
     }
 
@@ -61,6 +64,7 @@ final class Money implements Stringable
         }
 
         $raw = bcdiv($this->amount, $divStr, 6);
+
         return new self(self::roundHalfUp($raw, 2));
     }
 
@@ -102,10 +106,10 @@ final class Money implements Stringable
     public function formatRupiah(): string
     {
         $parts = explode('.', $this->amount);
-        $integerPart = number_format((float)$parts[0], 0, ',', '.');
+        $integerPart = number_format((float) $parts[0], 0, ',', '.');
         $decimalPart = $parts[1] ?? '00';
 
-        return 'Rp ' . $integerPart . ',' . $decimalPart;
+        return 'Rp '.$integerPart.','.$decimalPart;
     }
 
     public function __toString(): string
@@ -121,12 +125,13 @@ final class Money implements Stringable
 
         if (is_float($val)) {
             $str = sprintf('%.4f', $val);
+
             return self::roundHalfUp($str, 2);
         }
 
-        $clean = trim((string)$val);
+        $clean = trim((string) $val);
         // If scientific notation or dirty format
-        if (!preg_match('/^-?\d+(\.\d+)?$/', $clean)) {
+        if (! preg_match('/^-?\d+(\.\d+)?$/', $clean)) {
             throw new InvalidArgumentException("Invalid monetary amount string format: '{$val}'");
         }
 
@@ -138,14 +143,14 @@ final class Money implements Stringable
         $isNegative = str_starts_with($number, '-');
         $abs = ltrim($number, '-');
 
-        if (!str_contains($abs, '.')) {
-            $abs .= '.' . str_repeat('0', $precision + 4);
+        if (! str_contains($abs, '.')) {
+            $abs .= '.'.str_repeat('0', $precision + 4);
         } else {
             $abs .= str_repeat('0', 4);
         }
 
         // Half-up: add 0.005 for precision 2, then truncate with bcadd(..., 0, precision)
-        $halfAdder = '0.' . str_repeat('0', $precision) . '5';
+        $halfAdder = '0.'.str_repeat('0', $precision).'5';
         $added = bcadd($abs, $halfAdder, $precision + 2);
 
         // Format to exact precision
@@ -154,8 +159,8 @@ final class Money implements Stringable
         $fractionPart = substr($added, $dotPos + 1, $precision);
         $fractionPart = str_pad($fractionPart, $precision, '0');
 
-        $result = $integerPart . '.' . $fractionPart;
+        $result = $integerPart.'.'.$fractionPart;
 
-        return ($isNegative && bccomp($result, '0.00', $precision) !== 0) ? '-' . $result : $result;
+        return ($isNegative && bccomp($result, '0.00', $precision) !== 0) ? '-'.$result : $result;
     }
 }

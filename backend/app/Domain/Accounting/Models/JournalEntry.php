@@ -5,26 +5,34 @@ namespace App\Domain\Accounting\Models;
 use App\Domain\Accounting\Exceptions\AlreadyReversedException;
 use App\Domain\Accounting\Exceptions\ImmutableJournalException;
 use App\Domain\Classification\Models\BusinessTransaction;
+use App\Domain\Classification\Models\ClassificationRule;
 use App\Domain\Organization\Traits\BelongsToTenant;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use InvalidArgumentException;
 
 class JournalEntry extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     public const STATUS_DRAFT = 'draft';
+
     public const STATUS_POSTED = 'posted';
+
     public const STATUS_REVERSED = 'reversed';
 
     public const TYPE_OPENING_BALANCE = 'opening_balance';
+
     public const TYPE_PAYMENT = 'payment';
+
     public const TYPE_RECEIPT = 'receipt';
+
     public const TYPE_ADJUSTMENT = 'adjustment';
+
     public const TYPE_REVERSAL = 'reversal';
 
     protected $table = 'journal_entries';
@@ -41,6 +49,7 @@ class JournalEntry extends Model
         'status',
         'posted_at',
         'posted_by',
+        'posted_by_rule_id',
         'reversed_entry_id',
         'created_by',
     ];
@@ -67,7 +76,7 @@ class JournalEntry extends Model
                 $allowed = ['status', 'reversed_entry_id', 'updated_at'];
                 $disallowed = array_diff($dirty, $allowed);
 
-                if (!empty($disallowed) || $entry->status !== self::STATUS_REVERSED) {
+                if (! empty($disallowed) || $entry->status !== self::STATUS_REVERSED) {
                     throw new ImmutableJournalException($entry->entry_number, 'modify');
                 }
             } elseif ($originalStatus === self::STATUS_REVERSED) {
@@ -106,9 +115,24 @@ class JournalEntry extends Model
         return $this->belongsTo(BusinessTransaction::class, 'business_transaction_id');
     }
 
+    public function sources(): HasMany
+    {
+        return $this->hasMany(JournalEntrySource::class, 'journal_entry_id');
+    }
+
+    public function primarySource(): HasOne
+    {
+        return $this->hasOne(JournalEntrySource::class, 'journal_entry_id')->where('leg_role', JournalEntrySource::ROLE_PRIMARY);
+    }
+
     public function postedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'posted_by');
+    }
+
+    public function postedByRule(): BelongsTo
+    {
+        return $this->belongsTo(ClassificationRule::class, 'posted_by_rule_id');
     }
 
     public function createdBy(): BelongsTo
@@ -123,8 +147,8 @@ class JournalEntry extends Model
 
     public function markAsReversed(int $reversalEntryId): void
     {
-        if (!$this->isPosted()) {
-            throw new InvalidArgumentException("Only POSTED journals can be marked as reversed.");
+        if (! $this->isPosted()) {
+            throw new InvalidArgumentException('Only POSTED journals can be marked as reversed.');
         }
 
         if ($this->reversed_entry_id !== null) {
