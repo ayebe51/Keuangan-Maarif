@@ -9,11 +9,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AccountMapping extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     public const TYPE_BANK_ACCOUNT = 'bank_account';
+
     public const TYPE_TRANSACTION_TYPE = 'transaction_type';
+
     public const TYPE_REPORT_CATEGORY = 'report_category';
+
     public const TYPE_LEGACY_CODE = 'legacy_code';
 
     protected $table = 'account_mappings';

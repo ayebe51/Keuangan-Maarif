@@ -10,15 +10,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Account extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     public const TYPE_ASSET = 'asset';
+
     public const TYPE_LIABILITY = 'liability';
+
     public const TYPE_EQUITY = 'equity';
+
     public const TYPE_REVENUE = 'revenue';
+
     public const TYPE_EXPENSE = 'expense';
 
     public const BALANCE_DEBIT = 'debit';
+
     public const BALANCE_CREDIT = 'credit';
 
     protected $table = 'accounts';
