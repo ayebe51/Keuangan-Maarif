@@ -39,7 +39,7 @@ class TransferDetectionService
         }
 
         // Must have transfer keyword or internal counterparty to be considered an internal transfer
-        if (!$isInternalCounterparty && !$hasTransferKeyword) {
+        if (! $isInternalCounterparty && ! $hasTransferKeyword) {
             return null;
         }
 
@@ -77,12 +77,12 @@ class TransferDetectionService
             ->where('direction', $oppositeDirection)
             ->where('amount', $transaction->amount)
             ->whereBetween('transaction_date', [
-                date('Y-m-d', strtotime($transaction->transaction_date . ' -3 days')),
-                date('Y-m-d', strtotime($transaction->transaction_date . ' +3 days')),
+                date('Y-m-d', strtotime($transaction->transaction_date.' -3 days')),
+                date('Y-m-d', strtotime($transaction->transaction_date.' +3 days')),
             ])
             ->first();
 
-        if (!$mentionsOtherAccount && !$pairedBankTx && !$isInternalCounterparty) {
+        if (! $mentionsOtherAccount && ! $pairedBankTx && ! $isInternalCounterparty) {
             return null;
         }
 
@@ -105,7 +105,7 @@ class TransferDetectionService
             targetAccountId: $targetAccountId,
             counterpartyId: $transaction->counterparty_id,
             autoPostEligible: true,
-            evidence: "Internal transfer detected between LP Ma'arif bank accounts" . ($pairedBankTx ? " (Paired with Bank Tx #{$pairedBankTx->id})" : ""),
+            evidence: "Internal transfer detected between LP Ma'arif bank accounts".($pairedBankTx ? " (Paired with Bank Tx #{$pairedBankTx->id})" : ''),
             explanation: "Internal transfer between LP Ma'arif accounts (P&L-neutral).",
             metadata: [
                 'is_transfer' => true,

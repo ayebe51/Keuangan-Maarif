@@ -121,7 +121,7 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
                 ->where('end_date', '>=', $txDate)
                 ->first();
 
-            if (!$fiscalPeriod) {
+            if (! $fiscalPeriod) {
                 // Fallback to active/open period
                 $fiscalPeriod = FiscalPeriod::withoutGlobalScopes()
                     ->where('organization_id', $orgId)
@@ -144,7 +144,7 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
             if ($match->isMatched) {
                 if ($match->priority <= 4 && $match->autoPostEligible) {
                     $classificationStatus = ClassificationStatus::CLASSIFIED;
-                    $autoPostEligible = !$isPeriodLocked;
+                    $autoPostEligible = ! $isPeriodLocked;
                 } else {
                     $classificationStatus = ClassificationStatus::SUGGESTED;
                     $autoPostEligible = false;
@@ -277,12 +277,12 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
             $orgId = (int) $suggestion->organization_id;
             $bizTx = $suggestion->businessTransaction;
 
-            if (!$bizTx) {
-                throw new InvalidArgumentException("Associated business transaction not found.");
+            if (! $bizTx) {
+                throw new InvalidArgumentException('Associated business transaction not found.');
             }
 
             if ($bizTx->isPosted()) {
-                throw new ImmutableClassifiedTransactionException("Cannot apply suggestion on posted transaction.");
+                throw new ImmutableClassifiedTransactionException('Cannot apply suggestion on posted transaction.');
             }
 
             // Update BusinessTransaction with suggested values
@@ -292,8 +292,8 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
                 'transaction_category_id' => $suggestion->suggested_category_id ?? $bizTx->transaction_category_id,
                 'counterparty_id' => $suggestion->suggested_counterparty_id ?? $bizTx->counterparty_id,
                 'classification_status' => ClassificationStatus::APPROVED,
-                'auto_post_eligible' => !$bizTx->is_period_locked,
-                'notes' => "Suggestion accepted: " . $suggestion->explanation,
+                'auto_post_eligible' => ! $bizTx->is_period_locked,
+                'notes' => 'Suggestion accepted: '.$suggestion->explanation,
             ]);
 
             // Mark suggestion accepted
@@ -366,17 +366,17 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
                 ->first();
 
             if ($existing && $existing->isPosted()) {
-                throw new ImmutableClassifiedTransactionException("Cannot manually reclassify a posted transaction.");
+                throw new ImmutableClassifiedTransactionException('Cannot manually reclassify a posted transaction.');
             }
 
             $txType = $data['transaction_type'];
             $bizType = BusinessTransactionType::tryFrom($txType);
-            if (!$bizType) {
+            if (! $bizType) {
                 throw new InvalidArgumentException("Invalid transaction type '{$txType}'.");
             }
 
             $txDir = is_object($transaction->direction) ? $transaction->direction->value : (string) $transaction->direction;
-            if (!$bizType->isDirectionAllowed($txDir)) {
+            if (! $bizType->isDirectionAllowed($txDir)) {
                 throw new InvalidClassificationDirectionException(
                     "Direction '{$txDir}' is not allowed for transaction type '{$txType}'."
                 );
@@ -415,7 +415,7 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
                 'classification_method' => ClassificationMethod::MANUAL->value,
                 'classification_confidence' => 1.00,
                 'is_period_locked' => $isPeriodLocked,
-                'auto_post_eligible' => !$isPeriodLocked,
+                'auto_post_eligible' => ! $isPeriodLocked,
                 'description' => $data['description'] ?? $transaction->description ?? 'Manual Classification',
                 'notes' => $data['notes'] ?? 'Manually classified by operator',
                 'status' => 'draft',
@@ -435,11 +435,11 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
             ]);
 
             // Save as rule if requested
-            if (!empty($data['save_as_rule'])) {
+            if (! empty($data['save_as_rule'])) {
                 $pattern = $data['rule_pattern'] ?? $transaction->description;
                 $this->ruleService->create([
                     'organization_id' => $orgId,
-                    'name' => "Rule for " . substr($pattern, 0, 50),
+                    'name' => 'Rule for '.substr($pattern, 0, 50),
                     'priority' => 100,
                     'rule_type' => 'KEYWORD',
                     'direction' => $txDir,

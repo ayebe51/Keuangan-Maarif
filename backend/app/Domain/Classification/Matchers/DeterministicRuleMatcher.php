@@ -13,13 +13,13 @@ class DeterministicRuleMatcher
     /**
      * Match bank transaction against deterministic category / text rules (Priority 4).
      *
-     * @param ClassificationRule[] $rules Optional preloaded rules
+     * @param  ClassificationRule[]  $rules  Optional preloaded rules
      */
     public function match(BankTransaction $transaction, array $rules = []): ?ClassificationMatchResult
     {
         $orgId = (int) $transaction->organization_id;
 
-        $candidates = !empty($rules)
+        $candidates = ! empty($rules)
             ? array_filter($rules, fn ($r) => $r->is_active && $r->priority > 10 && $r->rule_type !== 'EXACT_REFERENCE')
             : ClassificationRule::withoutGlobalScopes()
                 ->where('organization_id', $orgId)
@@ -36,7 +36,7 @@ class DeterministicRuleMatcher
             if ($rule->matches($transaction)) {
                 // Ensure direction is compatible with transaction type
                 $bizType = BusinessTransactionType::tryFrom($rule->transaction_type);
-                if ($bizType && !$bizType->isDirectionAllowed($txDir)) {
+                if ($bizType && ! $bizType->isDirectionAllowed($txDir)) {
                     continue; // Skip conflicting rule
                 }
 

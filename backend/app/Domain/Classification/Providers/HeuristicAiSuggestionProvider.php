@@ -34,18 +34,18 @@ class HeuristicAiSuggestionProvider implements AiSuggestionInterface
             if ($this->containsAny($desc, ['bunga', 'jasa giro', 'interest'])) {
                 $type = BusinessTransactionType::BANK_INTEREST->value;
                 $accountPrefix = '42'; // 4200 Pendapatan Jasa Giro & Bunga Bank
-                $evidence = "Detected banking interest indicators in incoming credit";
-                $explanation = "Transaction description contains interest/giro service tokens.";
+                $evidence = 'Detected banking interest indicators in incoming credit';
+                $explanation = 'Transaction description contains interest/giro service tokens.';
             } elseif ($this->containsAny($desc, ['bantuan', 'hibah', 'subsidi', 'donasi'])) {
                 $type = BusinessTransactionType::DIRECT_INCOME->value;
                 $accountPrefix = '41';
                 $evidence = "Detected grant/subsidy tokens ('bantuan' / 'hibah')";
-                $explanation = "Classified as direct grant income based on NLP pattern matching.";
+                $explanation = 'Classified as direct grant income based on NLP pattern matching.';
             } elseif ($this->containsAny($desc, ['infaq', 'iuran', 'spp', 'setoran', 'darwata', 'madrasah', 'sekolah', 'siswa'])) {
                 $type = BusinessTransactionType::DIRECT_INCOME->value;
                 $accountPrefix = '41';
-                $evidence = "Detected educational fee / contribution keywords";
-                $explanation = "Incoming transfer identified as institutional contribution or school receipt.";
+                $evidence = 'Detected educational fee / contribution keywords';
+                $explanation = 'Incoming transfer identified as institutional contribution or school receipt.';
             } else {
                 // If no keywords match, do NOT suggest anything blindly
                 return null;
@@ -55,17 +55,17 @@ class HeuristicAiSuggestionProvider implements AiSuggestionInterface
                 $type = BusinessTransactionType::BANK_FEE_TAX->value;
                 $accountPrefix = '52'; // 5200 Beban Administrasi Bank
                 $evidence = "Detected bank charge or tax deduction tokens ('adm' / 'pajak')";
-                $explanation = "Identified as bank administrative charge or transaction fee.";
+                $explanation = 'Identified as bank administrative charge or transaction fee.';
             } elseif ($this->containsAny($desc, ['beasiswa', 'alokasi', 'penyaluran', 'santunan', 'baksos', 'dana cadangan'])) {
                 $type = BusinessTransactionType::ALLOCATION_DISBURSEMENT->value;
                 $accountPrefix = '21';
                 $evidence = "Detected allocation / disbursement tokens ('beasiswa' / 'penyaluran')";
-                $explanation = "Classified as fund allocation disbursement.";
+                $explanation = 'Classified as fund allocation disbursement.';
             } elseif ($this->containsAny($desc, ['listrik', 'pln', 'air', 'pdam', 'internet', 'wifi', 'atk', 'konsumsi', 'snack', 'fotokopi', 'honor', 'gaji', 'rapat'])) {
                 $type = BusinessTransactionType::OPERATING_EXPENSE->value;
                 $accountPrefix = '51'; // 5100 Beban Operasional Kantor
                 $evidence = "Detected operational expense indicators ('{$desc}')";
-                $explanation = "Classified as routine operational office expense.";
+                $explanation = 'Classified as routine operational office expense.';
             } else {
                 // If no keywords match, do NOT suggest anything blindly
                 return null;
@@ -106,6 +106,7 @@ class HeuristicAiSuggestionProvider implements AiSuggestionInterface
                 return true;
             }
         }
+
         return false;
     }
 }

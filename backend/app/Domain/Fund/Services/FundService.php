@@ -2,6 +2,7 @@
 
 namespace App\Domain\Fund\Services;
 
+use App\Domain\Accounting\Models\FiscalPeriod;
 use App\Domain\Accounting\Services\AccountService;
 use App\Domain\Accounting\Services\FiscalPeriodService;
 use App\Domain\Accounting\ValueObjects\Money;
@@ -27,12 +28,12 @@ class FundService
             $orgId = (int) $data['organization_id'];
 
             $type = $data['fund_type'] ?? Fund::TYPE_RESTRICTED;
-            if (!in_array($type, Fund::ALL_TYPES, true)) {
+            if (! in_array($type, Fund::ALL_TYPES, true)) {
                 throw new InvalidArgumentException("Invalid fund type '{$type}'.");
             }
 
             $status = $data['status'] ?? Fund::STATUS_ACTIVE;
-            if (!in_array($status, Fund::ALL_STATUSES, true)) {
+            if (! in_array($status, Fund::ALL_STATUSES, true)) {
                 throw new InvalidArgumentException("Invalid fund status '{$status}'.");
             }
 
@@ -78,14 +79,14 @@ class FundService
             $orgId = (int) $fund->organization_id;
 
             if (array_key_exists('organization_id', $data) && (int) $data['organization_id'] !== $orgId) {
-                throw new CrossTenantViolationException("Cannot change organization of fund.");
+                throw new CrossTenantViolationException('Cannot change organization of fund.');
             }
 
-            if (isset($data['fund_type']) && !in_array($data['fund_type'], Fund::ALL_TYPES, true)) {
+            if (isset($data['fund_type']) && ! in_array($data['fund_type'], Fund::ALL_TYPES, true)) {
                 throw new InvalidArgumentException("Invalid fund type '{$data['fund_type']}'.");
             }
 
-            if (isset($data['status']) && !in_array($data['status'], Fund::ALL_STATUSES, true)) {
+            if (isset($data['status']) && ! in_array($data['status'], Fund::ALL_STATUSES, true)) {
                 throw new InvalidArgumentException("Invalid fund status '{$data['status']}'.");
             }
 
@@ -143,18 +144,18 @@ class FundService
             $orgId = (int) $data['organization_id'];
 
             $fund = Fund::withoutGlobalScopes()->where('id', $data['fund_id'])->first();
-            if (!$fund || (int) $fund->organization_id !== $orgId) {
-                throw new CrossTenantViolationException("Fund not found or belongs to a different organization.");
+            if (! $fund || (int) $fund->organization_id !== $orgId) {
+                throw new CrossTenantViolationException('Fund not found or belongs to a different organization.');
             }
 
             $effectiveDate = $data['effective_date'] ?? null;
-            if (!$effectiveDate && isset($data['fiscal_period_id'])) {
-                $fp = \App\Domain\Accounting\Models\FiscalPeriod::find($data['fiscal_period_id']);
+            if (! $effectiveDate && isset($data['fiscal_period_id'])) {
+                $fp = FiscalPeriod::find($data['fiscal_period_id']);
                 if ($fp) {
                     $effectiveDate = $fp->start_date->format('Y-m-d');
                 }
             }
-            if (!$effectiveDate) {
+            if (! $effectiveDate) {
                 $effectiveDate = now()->format('Y-m-d');
             }
 
@@ -164,8 +165,8 @@ class FundService
             );
 
             $allocated = Money::of($data['allocated_amount']);
-            if (!$allocated->isPositive()) {
-                throw new InvalidArgumentException("Allocated amount must be greater than zero.");
+            if (! $allocated->isPositive()) {
+                throw new InvalidArgumentException('Allocated amount must be greater than zero.');
             }
 
             $allocation = FundAllocation::create([
@@ -200,8 +201,8 @@ class FundService
         return DB::transaction(function () use ($allocation, $amount, $user) {
             $fund = $allocation->fund;
             $amt = Money::of($amount);
-            if (!$amt->isPositive()) {
-                throw new InvalidArgumentException("Commit amount must be greater than zero.");
+            if (! $amt->isPositive()) {
+                throw new InvalidArgumentException('Commit amount must be greater than zero.');
             }
 
             $available = Money::of($allocation->available_amount);
@@ -243,8 +244,8 @@ class FundService
         return DB::transaction(function () use ($allocation, $amount, $fromCommitted, $user) {
             $fund = $allocation->fund;
             $amt = Money::of($amount);
-            if (!$amt->isPositive()) {
-                throw new InvalidArgumentException("Disburse amount must be greater than zero.");
+            if (! $amt->isPositive()) {
+                throw new InvalidArgumentException('Disburse amount must be greater than zero.');
             }
 
             if ($fromCommitted) {
@@ -295,8 +296,8 @@ class FundService
     {
         return DB::transaction(function () use ($allocation, $amount, $user) {
             $amt = Money::of($amount);
-            if (!$amt->isPositive()) {
-                throw new InvalidArgumentException("Return amount must be greater than zero.");
+            if (! $amt->isPositive()) {
+                throw new InvalidArgumentException('Return amount must be greater than zero.');
             }
 
             $before = $allocation->toArray();

@@ -13,14 +13,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Fund extends Model
 {
-    use HasFactory, BelongsToTenant, SoftDeletes;
+    use BelongsToTenant, HasFactory, SoftDeletes;
 
     public const TYPE_RESTRICTED = 'restricted';
+
     public const TYPE_UNRESTRICTED = 'unrestricted';
+
     public const TYPE_TEMPORARILY_RESTRICTED = 'temporarily_restricted';
 
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_COMPLETED = 'completed';
+
     public const STATUS_CANCELLED = 'cancelled';
 
     public const ALL_TYPES = [

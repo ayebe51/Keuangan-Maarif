@@ -9,11 +9,17 @@ class Role extends SpatieRole
 {
     // List of canonical system roles
     public const SUPER_ADMIN = 'SUPER_ADMIN';
+
     public const ACCOUNTING_ADMIN = 'ACCOUNTING_ADMIN';
+
     public const ACCOUNTING_OPERATOR = 'ACCOUNTING_OPERATOR';
+
     public const RECONCILER = 'RECONCILER';
+
     public const APPROVER = 'APPROVER';
+
     public const REPORT_VIEWER = 'REPORT_VIEWER';
+
     public const AUDITOR = 'AUDITOR';
 
     protected $fillable = [

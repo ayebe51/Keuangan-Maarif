@@ -2,7 +2,6 @@
 
 namespace App\Domain\Classification\Matchers;
 
-use App\Domain\Accounting\Models\Account;
 use App\Domain\Accounting\Models\AccountMapping;
 use App\Domain\Bank\Models\BankTransaction;
 use App\Domain\Classification\Contracts\LegacyCodeResolverInterface;
@@ -18,7 +17,7 @@ class LegacyCodeMatcher implements LegacyCodeResolverInterface
     public function resolve(int $organizationId, string $description): ?array
     {
         // Search for 4-digit code enclosed in brackets e.g. [1314] or standalone token e.g. "1314"
-        if (!preg_match('/\b(1\d{3}|2\d{3}|3\d{3}|4\d{3}|5\d{3})\b/', $description, $matches)) {
+        if (! preg_match('/\b(1\d{3}|2\d{3}|3\d{3}|4\d{3}|5\d{3})\b/', $description, $matches)) {
             return null;
         }
 
@@ -32,7 +31,7 @@ class LegacyCodeMatcher implements LegacyCodeResolverInterface
             ->with('account')
             ->first();
 
-        if (!$mapping || !$mapping->account) {
+        if (! $mapping || ! $mapping->account) {
             return null;
         }
 
@@ -72,19 +71,19 @@ class LegacyCodeMatcher implements LegacyCodeResolverInterface
         $desc = (string) ($transaction->description ?? '');
         $resolved = $this->resolve($orgId, $desc);
 
-        if (!$resolved) {
+        if (! $resolved) {
             return null;
         }
 
         $type = $resolved['transaction_type'] ?? null;
-        if (!$type) {
+        if (! $type) {
             return null;
         }
 
         // Validate direction compatibility
         $bizType = BusinessTransactionType::tryFrom($type);
         $txDir = is_object($transaction->direction) ? $transaction->direction->value : (string) $transaction->direction;
-        if ($bizType && !$bizType->isDirectionAllowed($txDir)) {
+        if ($bizType && ! $bizType->isDirectionAllowed($txDir)) {
             return null; // Direction mismatch, reject legacy mapping match
         }
 

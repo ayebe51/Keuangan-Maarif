@@ -17,7 +17,7 @@ class CounterpartyService
         return DB::transaction(function () use ($data, $user) {
             $orgId = (int) $data['organization_id'];
 
-            if (!in_array($data['role'], Counterparty::ALL_ROLES, true)) {
+            if (! in_array($data['role'], Counterparty::ALL_ROLES, true)) {
                 throw new InvalidArgumentException("Invalid counterparty role '{$data['role']}'.");
             }
 
@@ -42,7 +42,7 @@ class CounterpartyService
             );
 
             // Add additional aliases if provided
-            if (!empty($data['aliases']) && is_array($data['aliases'])) {
+            if (! empty($data['aliases']) && is_array($data['aliases'])) {
                 foreach ($data['aliases'] as $alias) {
                     if (is_string($alias) && trim($alias) !== '') {
                         $this->addAlias($counterparty, $alias, CounterpartyAlias::SOURCE_MANUAL, $user);
@@ -71,10 +71,10 @@ class CounterpartyService
             $orgId = (int) $counterparty->organization_id;
 
             if (array_key_exists('organization_id', $data) && (int) $data['organization_id'] !== $orgId) {
-                throw new CrossTenantViolationException("Cannot change organization of counterparty.");
+                throw new CrossTenantViolationException('Cannot change organization of counterparty.');
             }
 
-            if (isset($data['role']) && !in_array($data['role'], Counterparty::ALL_ROLES, true)) {
+            if (isset($data['role']) && ! in_array($data['role'], Counterparty::ALL_ROLES, true)) {
                 throw new InvalidArgumentException("Invalid counterparty role '{$data['role']}'.");
             }
 
@@ -128,7 +128,7 @@ class CounterpartyService
         $normalized = CounterpartyAlias::normalize($aliasName);
 
         if ($normalized === '') {
-            throw new InvalidArgumentException("Alias name cannot be empty.");
+            throw new InvalidArgumentException('Alias name cannot be empty.');
         }
 
         // Avoid duplicate within organization
@@ -244,7 +244,7 @@ class CounterpartyService
             ->where('code', 'BANK-BRI')
             ->first();
 
-        if (!$cp) {
+        if (! $cp) {
             $cp = Counterparty::create([
                 'organization_id' => $organizationId,
                 'role' => Counterparty::ROLE_BANK,
@@ -283,7 +283,7 @@ class CounterpartyService
             ->where('code', 'INTERNAL-MAARIF')
             ->first();
 
-        if (!$cp) {
+        if (! $cp) {
             $cp = Counterparty::create([
                 'organization_id' => $organizationId,
                 'role' => Counterparty::ROLE_INTERNAL,

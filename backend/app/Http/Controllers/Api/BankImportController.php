@@ -31,7 +31,7 @@ class BankImportController extends Controller
 
         $uploadedFile = $request->file('file');
         $extension = strtolower($uploadedFile->getClientOriginalExtension());
-        if (!in_array($extension, ['csv', 'txt', 'xlsx'], true)) {
+        if (! in_array($extension, ['csv', 'txt', 'xlsx'], true)) {
             return response()->json([
                 'message' => "Unsupported file extension '{$extension}'. Only .csv, .txt, and .xlsx files are supported.",
                 'error' => 'UNSUPPORTED_BANK_FORMAT',
@@ -147,7 +147,7 @@ class BankImportController extends Controller
             ->where('bank_import_id', $import->id)
             ->where(function ($q) {
                 $q->whereIn('status', [BankRawSource::STATUS_ERROR, BankRawSource::STATUS_DUPLICATE])
-                  ->orWhereNotNull('error_code');
+                    ->orWhereNotNull('error_code');
             })
             ->orderBy('source_row')
             ->paginate($request->input('per_page', 50));

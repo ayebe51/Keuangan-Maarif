@@ -5,7 +5,6 @@ namespace App\Domain\Classification\Matchers;
 use App\Domain\Bank\Models\BankTransaction;
 use App\Domain\Classification\DTOs\ClassificationMatchResult;
 use App\Domain\Classification\Enums\ClassificationMethod;
-use App\Domain\Classification\Models\BusinessTransaction;
 use Illuminate\Support\Facades\DB;
 
 class HistoricalHeuristicMatcher
@@ -16,7 +15,7 @@ class HistoricalHeuristicMatcher
      */
     public function match(BankTransaction $transaction): ?ClassificationMatchResult
     {
-        if (!$transaction->counterparty_id) {
+        if (! $transaction->counterparty_id) {
             return null;
         }
 
@@ -36,7 +35,7 @@ class HistoricalHeuristicMatcher
             ->orderByDesc('occurrences')
             ->first();
 
-        if (!$historical || (int) $historical->occurrences < 1) {
+        if (! $historical || (int) $historical->occurrences < 1) {
             return null;
         }
 
@@ -54,7 +53,7 @@ class HistoricalHeuristicMatcher
             counterpartyId: $cpId,
             autoPostEligible: false, // SUGGESTION ONLY! Must never auto-post
             evidence: "Detected recurring historical pattern with counterparty #{$cpId} ({$occurrences} previous posted transactions)",
-            explanation: "Suggested based on past transactions for this counterparty.",
+            explanation: 'Suggested based on past transactions for this counterparty.',
             metadata: [
                 'occurrences' => $occurrences,
                 'counterparty_id' => $cpId,

@@ -12,10 +12,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class TransactionCategory extends Model
 {
-    use HasFactory, BelongsToTenant, SoftDeletes;
+    use BelongsToTenant, HasFactory, SoftDeletes;
 
     public const DIRECTION_IN = 'IN';
+
     public const DIRECTION_OUT = 'OUT';
+
     public const DIRECTION_TRANSFER = 'TRANSFER';
 
     public const ALL_DIRECTIONS = [

@@ -14,7 +14,7 @@ class AiSuggestionService implements AiSuggestionInterface
     public function __construct(
         protected ?AiSuggestionInterface $provider = null
     ) {
-        $this->provider = $provider ?? new HeuristicAiSuggestionProvider();
+        $this->provider = $provider ?? new HeuristicAiSuggestionProvider;
     }
 
     public function suggest(BankTransaction $transaction, array $context = []): ?AiSuggestionResult
@@ -29,7 +29,7 @@ class AiSuggestionService implements AiSuggestionInterface
     public function match(BankTransaction $transaction, array $context = []): ?ClassificationMatchResult
     {
         $suggestion = $this->suggest($transaction, $context);
-        if (!$suggestion) {
+        if (! $suggestion) {
             return null;
         }
 

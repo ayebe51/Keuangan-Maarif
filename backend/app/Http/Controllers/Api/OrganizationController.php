@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Audit\Services\AuditService;
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Organization\Services\TenantContext;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,7 +29,7 @@ class OrganizationController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isSuperAdmin() && (int)$user->organization_id !== $id) {
+        if (! $user->isSuperAdmin() && (int) $user->organization_id !== $id) {
             return response()->json([
                 'message' => 'Akses ditolak: Anda tidak memiliki izin melihat data organisasi ini.',
             ], 403);
@@ -47,7 +46,7 @@ class OrganizationController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isSuperAdmin()) {
+        if (! $user->isSuperAdmin()) {
             return response()->json([
                 'message' => 'Akses ditolak: Hanya SUPER_ADMIN yang dapat membuat organisasi baru.',
             ], 403);
@@ -72,7 +71,7 @@ class OrganizationController extends Controller
             modelType: Organization::class,
             modelId: $organization->id,
             newValues: $organization->toArray(),
-            notes: 'Pembuatan organisasi baru: ' . $organization->name,
+            notes: 'Pembuatan organisasi baru: '.$organization->name,
             organizationId: $organization->id
         );
 
@@ -86,7 +85,7 @@ class OrganizationController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->isSuperAdmin() && ((int)$user->organization_id !== $id || !$user->hasPermissionTo('organization.update'))) {
+        if (! $user->isSuperAdmin() && ((int) $user->organization_id !== $id || ! $user->hasPermissionTo('organization.update'))) {
             return response()->json([
                 'message' => 'Akses ditolak: Anda tidak memiliki izin mengubah data organisasi ini.',
             ], 403);
@@ -95,7 +94,7 @@ class OrganizationController extends Controller
         $organization = Organization::findOrFail($id);
 
         $validated = $request->validate([
-            'code' => ['sometimes', 'string', 'max:50', 'unique:organizations,code,' . $organization->id],
+            'code' => ['sometimes', 'string', 'max:50', 'unique:organizations,code,'.$organization->id],
             'name' => ['sometimes', 'string', 'max:255'],
             'type' => ['nullable', 'string', 'max:50'],
             'address' => ['nullable', 'string', 'max:255'],
@@ -115,7 +114,7 @@ class OrganizationController extends Controller
             modelId: $organization->id,
             oldValues: $oldValues,
             newValues: $organization->toArray(),
-            notes: 'Update profil organisasi: ' . $organization->name,
+            notes: 'Update profil organisasi: '.$organization->name,
             organizationId: $organization->id
         );
 

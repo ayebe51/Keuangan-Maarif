@@ -60,13 +60,13 @@ class FundController extends Controller
         $validated = $request->validate([
             'code' => ['required', 'string', 'max:50'],
             'name' => ['required', 'string', 'max:150'],
-            'fund_type' => ['nullable', 'string', 'in:' . implode(',', Fund::ALL_TYPES)],
+            'fund_type' => ['nullable', 'string', 'in:'.implode(',', Fund::ALL_TYPES)],
             'account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'budget_amount' => ['nullable', 'numeric', 'min:0'],
             'description' => ['nullable', 'string'],
-            'status' => ['nullable', 'string', 'in:' . implode(',', Fund::ALL_STATUSES)],
+            'status' => ['nullable', 'string', 'in:'.implode(',', Fund::ALL_STATUSES)],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
@@ -88,13 +88,13 @@ class FundController extends Controller
         $validated = $request->validate([
             'code' => ['sometimes', 'required', 'string', 'max:50'],
             'name' => ['sometimes', 'required', 'string', 'max:150'],
-            'fund_type' => ['nullable', 'string', 'in:' . implode(',', Fund::ALL_TYPES)],
+            'fund_type' => ['nullable', 'string', 'in:'.implode(',', Fund::ALL_TYPES)],
             'account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'budget_amount' => ['nullable', 'numeric', 'min:0'],
             'description' => ['nullable', 'string'],
-            'status' => ['nullable', 'string', 'in:' . implode(',', Fund::ALL_STATUSES)],
+            'status' => ['nullable', 'string', 'in:'.implode(',', Fund::ALL_STATUSES)],
             'is_active' => ['nullable', 'boolean'],
         ]);
 

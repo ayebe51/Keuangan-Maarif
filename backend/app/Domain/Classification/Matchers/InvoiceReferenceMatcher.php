@@ -5,8 +5,8 @@ namespace App\Domain\Classification\Matchers;
 use App\Domain\Accounting\Models\Account;
 use App\Domain\Bank\Models\BankTransaction;
 use App\Domain\Classification\DTOs\ClassificationMatchResult;
-use App\Domain\Classification\Enums\ClassificationMethod;
 use App\Domain\Classification\Enums\BusinessTransactionType;
+use App\Domain\Classification\Enums\ClassificationMethod;
 use Illuminate\Support\Facades\DB;
 
 class InvoiceReferenceMatcher
@@ -17,7 +17,7 @@ class InvoiceReferenceMatcher
     public function match(BankTransaction $transaction): ?ClassificationMatchResult
     {
         // Invoice matching only applies to incoming cash (Bank Credit = IN)
-        if (!$transaction->isCashIn()) {
+        if (! $transaction->isCashIn()) {
             return null;
         }
 
@@ -28,7 +28,7 @@ class InvoiceReferenceMatcher
 
         // 1. Try to extract reference matching format RCV-... or INV-...
         $matchedNumber = null;
-        if (preg_match('/(RCV-[A-Za-z0-9\-]+|INV-[A-Za-z0-9\-]+)/i', $desc . ' ' . $ref, $matches)) {
+        if (preg_match('/(RCV-[A-Za-z0-9\-]+|INV-[A-Za-z0-9\-]+)/i', $desc.' '.$ref, $matches)) {
             $matchedNumber = strtoupper($matches[1]);
         }
 
@@ -39,13 +39,13 @@ class InvoiceReferenceMatcher
                 ->whereIn('status', ['outstanding', 'partial'])
                 ->where(function ($q) use ($matchedNumber) {
                     $q->whereRaw('UPPER(receivable_number) = ?', [$matchedNumber])
-                      ->orWhereRaw('UPPER(description) LIKE ?', ["%{$matchedNumber}%"]);
+                        ->orWhereRaw('UPPER(description) LIKE ?', ["%{$matchedNumber}%"]);
                 })
                 ->first();
         }
 
         // 2. Fallback: if counterparty is resolved and exact amount matches single outstanding receivable
-        if (!$receivable && $transaction->counterparty_id) {
+        if (! $receivable && $transaction->counterparty_id) {
             $matchingRecs = DB::table('receivables')
                 ->where('organization_id', $orgId)
                 ->where('counterparty_id', $transaction->counterparty_id)
@@ -62,7 +62,7 @@ class InvoiceReferenceMatcher
             }
         }
 
-        if (!$receivable) {
+        if (! $receivable) {
             return null;
         }
 
@@ -75,7 +75,7 @@ class InvoiceReferenceMatcher
             ->where('organization_id', $orgId)
             ->where(function ($q) {
                 $q->where('code', 'LIKE', '12%')
-                  ->orWhere('code', 'LIKE', '13%');
+                    ->orWhere('code', 'LIKE', '13%');
             })
             ->where('is_postable', true)
             ->orderBy('code')
@@ -91,10 +91,10 @@ class InvoiceReferenceMatcher
             transactionType: BusinessTransactionType::RECEIVABLE_PAYMENT->value,
             targetAccountId: $accountId,
             counterpartyId: (int) $receivable->counterparty_id,
-            autoPostEligible: !$isOverpaid, // Overpayment requires review to allocate unapplied cash
-            evidence: "Matched Receivable {$receivable->receivable_number} (Outstanding: Rp " . number_format($outstanding, 2) . ")",
+            autoPostEligible: ! $isOverpaid, // Overpayment requires review to allocate unapplied cash
+            evidence: "Matched Receivable {$receivable->receivable_number} (Outstanding: Rp ".number_format($outstanding, 2).')',
             explanation: $isOverpaid
-                ? "Payment of Rp " . number_format($txAmount, 2) . " exceeds outstanding balance of Rp " . number_format($outstanding, 2) . ". Excess of Rp " . number_format($excessAmount, 2) . " routed to UNAPPLIED_CASH."
+                ? 'Payment of Rp '.number_format($txAmount, 2).' exceeds outstanding balance of Rp '.number_format($outstanding, 2).'. Excess of Rp '.number_format($excessAmount, 2).' routed to UNAPPLIED_CASH.'
                 : "Exact match for receivable {$receivable->receivable_number}",
             metadata: [
                 'receivable_id' => $receivable->id,

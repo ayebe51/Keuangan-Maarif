@@ -44,7 +44,7 @@ class ProgramService
             $orgId = (int) $program->organization_id;
 
             if (array_key_exists('organization_id', $data) && (int) $data['organization_id'] !== $orgId) {
-                throw new CrossTenantViolationException("Cannot change organization of program.");
+                throw new CrossTenantViolationException('Cannot change organization of program.');
             }
 
             $before = $program->toArray();

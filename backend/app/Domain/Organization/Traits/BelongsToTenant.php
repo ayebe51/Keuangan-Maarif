@@ -12,7 +12,7 @@ trait BelongsToTenant
 {
     public static function bootBelongsToTenant(): void
     {
-        static::addGlobalScope(new TenantScope());
+        static::addGlobalScope(new TenantScope);
 
         static::creating(function ($model) {
             if (TenantContext::isScopingBypassed()) {
@@ -24,7 +24,7 @@ trait BelongsToTenant
 
                 if (empty($model->organization_id)) {
                     $model->organization_id = $currentTenantId;
-                } elseif ((int)$model->organization_id !== (int)$currentTenantId) {
+                } elseif ((int) $model->organization_id !== (int) $currentTenantId) {
                     throw new CrossTenantViolationException(
                         sprintf(
                             'Cross-tenant violation: Cannot create record for organization %d while in context of organization %d.',
@@ -43,7 +43,7 @@ trait BelongsToTenant
 
             if (TenantContext::hasTenant() && $model->isDirty('organization_id')) {
                 $currentTenantId = TenantContext::getTenantId();
-                if ((int)$model->organization_id !== (int)$currentTenantId) {
+                if ((int) $model->organization_id !== (int) $currentTenantId) {
                     throw new CrossTenantViolationException(
                         'Cross-tenant violation: Cannot reassign record to a different organization.'
                     );

@@ -30,13 +30,13 @@ class CounterpartyController extends Controller
         }
 
         if ($request->filled('q')) {
-            $search = '%' . $request->query('q') . '%';
+            $search = '%'.$request->query('q').'%';
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'ilike', $search)
-                  ->orWhere('code', 'ilike', $search)
-                  ->orWhereHas('aliases', function ($aq) use ($search) {
-                      $aq->where('alias_name', 'ilike', $search);
-                  });
+                    ->orWhere('code', 'ilike', $search)
+                    ->orWhereHas('aliases', function ($aq) use ($search) {
+                        $aq->where('alias_name', 'ilike', $search);
+                    });
             });
         }
 
@@ -60,7 +60,7 @@ class CounterpartyController extends Controller
         $tenantId = TenantContext::getTenantId();
 
         $validated = $request->validate([
-            'role' => ['required', 'string', 'in:' . implode(',', Counterparty::ALL_ROLES)],
+            'role' => ['required', 'string', 'in:'.implode(',', Counterparty::ALL_ROLES)],
             'name' => ['required', 'string', 'max:200'],
             'code' => ['nullable', 'string', 'max:50'],
             'npwp' => ['nullable', 'string', 'max:30'],
@@ -88,7 +88,7 @@ class CounterpartyController extends Controller
         $counterparty = Counterparty::where('organization_id', $tenantId)->findOrFail($id);
 
         $validated = $request->validate([
-            'role' => ['sometimes', 'required', 'string', 'in:' . implode(',', Counterparty::ALL_ROLES)],
+            'role' => ['sometimes', 'required', 'string', 'in:'.implode(',', Counterparty::ALL_ROLES)],
             'name' => ['sometimes', 'required', 'string', 'max:200'],
             'code' => ['nullable', 'string', 'max:50'],
             'npwp' => ['nullable', 'string', 'max:30'],
@@ -162,7 +162,7 @@ class CounterpartyController extends Controller
         $tenantId = TenantContext::getTenantId();
         $rawName = $request->input('name') ?? $request->query('name', '');
 
-        if (!is_string($rawName) || trim($rawName) === '') {
+        if (! is_string($rawName) || trim($rawName) === '') {
             return response()->json([
                 'message' => 'Parameter nama counterparty wajib disertakan.',
                 'data' => null,
@@ -171,7 +171,7 @@ class CounterpartyController extends Controller
 
         $resolved = $this->counterpartyService->resolve($tenantId, $rawName);
 
-        if (!$resolved) {
+        if (! $resolved) {
             return response()->json([
                 'message' => 'Counterparty tidak ditemukan untuk string input yang diberikan.',
                 'data' => null,

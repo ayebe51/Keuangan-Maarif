@@ -10,7 +10,7 @@ class NegativeFundBalanceException extends Exception
         public readonly string $fundCode,
         public readonly string $attemptedAmount,
         public readonly string $availableAmount,
-        string $message = ""
+        string $message = ''
     ) {
         parent::__construct(
             $message ?: "Cannot disburse/commit {$attemptedAmount} from Fund '{$fundCode}'. Available balance is only {$availableAmount}."

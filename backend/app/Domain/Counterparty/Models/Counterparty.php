@@ -12,15 +12,22 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Counterparty extends Model
 {
-    use HasFactory, BelongsToTenant, SoftDeletes;
+    use BelongsToTenant, HasFactory, SoftDeletes;
 
     public const ROLE_PAYER = 'payer';
+
     public const ROLE_PAYEE = 'payee';
+
     public const ROLE_SCHOOL = 'school';
+
     public const ROLE_BANK = 'bank';
+
     public const ROLE_VENDOR = 'vendor';
+
     public const ROLE_DONOR = 'donor';
+
     public const ROLE_GOVERNMENT = 'government';
+
     public const ROLE_INTERNAL = 'internal';
 
     public const ALL_ROLES = [

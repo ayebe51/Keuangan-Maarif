@@ -60,7 +60,7 @@ class TransactionClassificationController extends Controller
         $query = BankTransaction::where('organization_id', $tenantId)
             ->where(function ($q) {
                 $q->where('classification_status', ClassificationStatus::UNCLASSIFIED->value)
-                  ->orWhereNull('classification_status');
+                    ->orWhereNull('classification_status');
             })
             ->with(['bankAccount', 'counterparty']);
 

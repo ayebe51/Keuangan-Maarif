@@ -29,11 +29,6 @@ class BankImportService
     /**
      * Ingest a bank statement file with raw preservation, idempotency, and normalization.
      *
-     * @param UploadedFile|string $file
-     * @param int $bankAccountId
-     * @param User $user
-     * @param array $options
-     * @return BankImport
      *
      * @throws DuplicateImportException
      * @throws InvalidBankStatementFormatException
@@ -50,7 +45,7 @@ class BankImportService
         // Step 1: Verify BankAccount and tenant boundaries
         $bankAccount = BankAccount::withoutGlobalScopes()->findOrFail($bankAccountId);
         if ((int) $bankAccount->organization_id !== $orgId) {
-            throw new CrossTenantViolationException("Unauthorized access to bank account outside your organization.");
+            throw new CrossTenantViolationException('Unauthorized access to bank account outside your organization.');
         }
 
         // Step 2: Resolve real path, filename, and extension
@@ -64,15 +59,15 @@ class BankImportService
             $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
         }
 
-        if (!file_exists($realPath) || !is_readable($realPath)) {
-            throw new InvalidBankStatementFormatException($originalName, "File could not be found or read.");
+        if (! file_exists($realPath) || ! is_readable($realPath)) {
+            throw new InvalidBankStatementFormatException($originalName, 'File could not be found or read.');
         }
 
         // Step 3: Compute SHA-256 file hash and verify duplicate file upload
         $fileHash = hash_file('sha256', $realPath);
-        $allowDuplicate = !empty($options['allow_duplicate_file']);
+        $allowDuplicate = ! empty($options['allow_duplicate_file']);
 
-        if (!$allowDuplicate) {
+        if (! $allowDuplicate) {
             $existing = BankImport::withoutGlobalScopes()
                 ->where('organization_id', $orgId)
                 ->where('bank_account_id', $bankAccountId)
@@ -151,7 +146,7 @@ class BankImportService
 
                     try {
                         // Calculate row sequence for same date
-                        $rawDateKey = (string)($rawRow['date_raw'] ?? 'unknown');
+                        $rawDateKey = (string) ($rawRow['date_raw'] ?? 'unknown');
                         $dateSequences[$rawDateKey] = ($dateSequences[$rawDateKey] ?? 0) + 1;
                         $rowSequence = $dateSequences[$rawDateKey];
 
@@ -177,6 +172,7 @@ class BankImportService
                             $rawSource->error_message = "Transaction with fingerprint {$fingerprint} already exists.";
                             $rawSource->save();
                             $skippedRows++;
+
                             continue;
                         }
 
@@ -205,8 +201,12 @@ class BankImportService
 
                         // Track date range
                         $txDate = $normalized['date'];
-                        if ($minDate === null || $txDate < $minDate) $minDate = $txDate;
-                        if ($maxDate === null || $txDate > $maxDate) $maxDate = $txDate;
+                        if ($minDate === null || $txDate < $minDate) {
+                            $minDate = $txDate;
+                        }
+                        if ($maxDate === null || $txDate > $maxDate) {
+                            $maxDate = $txDate;
+                        }
 
                         // Save for running balance continuity validation
                         $normalizedValidRows[] = [
@@ -229,7 +229,7 @@ class BankImportService
 
                 // Step 8: Continuous Running Balance Validation (REV3-06)
                 $discrepancies = $this->balanceValidator->validate($normalizedValidRows);
-                $hasDiscrepancies = !empty($discrepancies);
+                $hasDiscrepancies = ! empty($discrepancies);
 
                 if ($hasDiscrepancies) {
                     $bankImport->has_discrepancies = true;

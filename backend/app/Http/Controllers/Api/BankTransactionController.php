@@ -49,11 +49,11 @@ class BankTransactionController extends Controller
         }
 
         if ($request->filled('search')) {
-            $search = '%' . trim($request->input('search')) . '%';
+            $search = '%'.trim($request->input('search')).'%';
             $query->where(function ($q) use ($search) {
                 $q->where('description', 'like', $search)
-                  ->orWhere('reference_number', 'like', $search)
-                  ->orWhere('raw_counterparty_name', 'like', $search);
+                    ->orWhere('reference_number', 'like', $search)
+                    ->orWhere('raw_counterparty_name', 'like', $search);
             });
         }
 

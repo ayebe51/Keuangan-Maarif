@@ -17,14 +17,14 @@ class ExplicitMappingMatcher
         $orgId = (int) $transaction->organization_id;
 
         // If preloaded rules not provided, query DB
-        $candidates = !empty($rules)
+        $candidates = ! empty($rules)
             ? array_filter($rules, fn ($r) => $r->is_active && ($r->priority <= 10 || $r->rule_type === 'EXACT_REFERENCE'))
             : ClassificationRule::withoutGlobalScopes()
                 ->where('organization_id', $orgId)
                 ->where('is_active', true)
                 ->where(function ($q) {
                     $q->where('priority', '<=', 10)
-                      ->orWhere('rule_type', 'EXACT_REFERENCE');
+                        ->orWhere('rule_type', 'EXACT_REFERENCE');
                 })
                 ->orderBy('priority', 'asc')
                 ->get();

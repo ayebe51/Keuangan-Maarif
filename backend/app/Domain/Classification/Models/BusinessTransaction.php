@@ -2,16 +2,18 @@
 
 namespace App\Domain\Classification\Models;
 
+use App\Domain\Accounting\Enums\TransferPairingStatus;
 use App\Domain\Accounting\Models\Account;
 use App\Domain\Accounting\Models\FiscalPeriod;
 use App\Domain\Accounting\Models\JournalEntry;
+use App\Domain\Accounting\Models\JournalEntrySource;
 use App\Domain\Bank\Models\BankTransaction;
-use App\Domain\Classification\Enums\ClassificationMethod;
 use App\Domain\Classification\Enums\ClassificationStatus;
 use App\Domain\Counterparty\Models\Counterparty;
 use App\Domain\Fund\Models\Fund;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Traits\BelongsToTenant;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -20,7 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BusinessTransaction extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'business_transactions';
 
@@ -47,6 +49,12 @@ class BusinessTransaction extends Model
         'description',
         'notes',
         'status',
+        'posted_journal_entry_id',
+        'transfer_pairing_status',
+        'rule_snapshot',
+        'posted_at',
+        'posted_by',
+        'posting_error',
     ];
 
     protected $casts = [
@@ -56,6 +64,9 @@ class BusinessTransaction extends Model
         'classification_confidence' => 'float',
         'is_period_locked' => 'boolean',
         'auto_post_eligible' => 'boolean',
+        'rule_snapshot' => 'array',
+        'posted_at' => 'datetime',
+        'posting_error' => 'array',
     ];
 
     protected function amount(): Attribute
@@ -80,7 +91,7 @@ class BusinessTransaction extends Model
             $nextSeq = ((int) $numPart) + 1;
         }
 
-        return $prefix . str_pad((string) $nextSeq, 5, '0', STR_PAD_LEFT);
+        return $prefix.str_pad((string) $nextSeq, 5, '0', STR_PAD_LEFT);
     }
 
     public function organization(): BelongsTo
@@ -133,8 +144,48 @@ class BusinessTransaction extends Model
         return $this->hasMany(JournalEntry::class, 'business_transaction_id');
     }
 
+    public function journalEntrySources(): HasMany
+    {
+        return $this->hasMany(JournalEntrySource::class, 'business_transaction_id');
+    }
+
+    public function postedJournalEntry(): BelongsTo
+    {
+        return $this->belongsTo(JournalEntry::class, 'posted_journal_entry_id');
+    }
+
+    public function postedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'posted_by');
+    }
+
     public function isPosted(): bool
     {
-        return strtolower($this->status) === 'posted';
+        return strtolower((string) $this->status) === 'posted';
+    }
+
+    public function isRejected(): bool
+    {
+        return strtolower((string) $this->status) === 'rejected';
+    }
+
+    public function isReversed(): bool
+    {
+        return strtolower((string) $this->status) === 'reversed';
+    }
+
+    public function isTransfer(): bool
+    {
+        return $this->transaction_type === 'BANK_TRANSFER';
+    }
+
+    public function isTransferPaired(): bool
+    {
+        return $this->transfer_pairing_status === TransferPairingStatus::PAIRED->value;
+    }
+
+    public function isTransferAmbiguous(): bool
+    {
+        return $this->transfer_pairing_status === TransferPairingStatus::PAIRING_AMBIGUOUS->value;
     }
 }

@@ -10,10 +10,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CounterpartyAlias extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     public const SOURCE_MANUAL = 'manual';
+
     public const SOURCE_BANK_IMPORT = 'bank_import';
+
     public const SOURCE_SYSTEM = 'system';
 
     protected $table = 'counterparty_aliases';

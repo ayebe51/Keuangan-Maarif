@@ -16,10 +16,6 @@ class BankTransactionNormalizer
     /**
      * Normalize a raw parsed statement row into structured transaction attributes.
      *
-     * @param int $organizationId
-     * @param int $bankAccountId
-     * @param array $rawRow
-     * @param int $rowSequence
      * @return array{
      *     date: string,
      *     direction: BankTransactionDirection,
@@ -36,7 +32,7 @@ class BankTransactionNormalizer
     {
         $normalizedDate = $this->normalizeDate($rawRow['date_raw'] ?? null);
         if ($normalizedDate === null) {
-            throw new InvalidArgumentException("Unable to parse transaction date from raw value: " . json_encode($rawRow['date_raw'] ?? ''));
+            throw new InvalidArgumentException('Unable to parse transaction date from raw value: '.json_encode($rawRow['date_raw'] ?? ''));
         }
 
         $debit = $this->parseAmount($rawRow['debit_raw'] ?? null);
@@ -46,8 +42,8 @@ class BankTransactionNormalizer
         // BANK SEMANTICS INVARIANT:
         // Credit > 0 => IN (Uang Masuk / Kas Bertambah)
         // Debit > 0  => OUT (Uang Keluar / Kas Berkurang)
-        $creditVal = (float)$credit;
-        $debitVal = (float)$debit;
+        $creditVal = (float) $credit;
+        $debitVal = (float) $debit;
 
         if ($creditVal > 0 && $debitVal == 0) {
             $direction = BankTransactionDirection::IN;
@@ -65,14 +61,16 @@ class BankTransactionNormalizer
                 $amount = number_format($debitVal - $creditVal, 2, '.', '');
             }
         } else {
-            throw new InvalidArgumentException("Transaction row has neither valid debit nor credit amount.");
+            throw new InvalidArgumentException('Transaction row has neither valid debit nor credit amount.');
         }
 
-        $rawDesc = trim((string)($rawRow['desc_raw'] ?? ''));
+        $rawDesc = trim((string) ($rawRow['desc_raw'] ?? ''));
         $cleanDesc = strtoupper(preg_replace('/\s+/', ' ', $rawDesc));
 
-        $rawRef = isset($rawRow['ref_raw']) ? trim((string)$rawRow['ref_raw']) : null;
-        if ($rawRef === '') $rawRef = null;
+        $rawRef = isset($rawRow['ref_raw']) ? trim((string) $rawRow['ref_raw']) : null;
+        if ($rawRef === '') {
+            $rawRef = null;
+        }
 
         // Auto-resolve counterparty
         $counterparty = $this->counterpartyService->resolve($organizationId, $cleanDesc);
@@ -105,11 +103,11 @@ class BankTransactionNormalizer
 
     public function normalizeDate(mixed $dateRaw): ?string
     {
-        if ($dateRaw === null || trim((string)$dateRaw) === '') {
+        if ($dateRaw === null || trim((string) $dateRaw) === '') {
             return null;
         }
 
-        $str = trim((string)$dateRaw);
+        $str = trim((string) $dateRaw);
 
         // 1. Check ISO Y-m-d
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $str)) {
@@ -117,9 +115,10 @@ class BankTransactionNormalizer
         }
 
         // 2. Check numeric Excel serial date
-        if (is_numeric($str) && (float)$str > 30000 && (float)$str < 70000) {
-            $days = (int)$str;
+        if (is_numeric($str) && (float) $str > 30000 && (float) $str < 70000) {
+            $days = (int) $str;
             $seconds = ($days - 25569) * 86400;
+
             return gmdate('Y-m-d', $seconds);
         }
 
@@ -146,6 +145,7 @@ class BankTransactionNormalizer
                 if (preg_match('/(\d{1,2})\s+[a-z]+\s+(\d{4})/i', $str, $matches)) {
                     $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
                     $year = $matches[2];
+
                     return "{$year}-{$mNum}-{$day}";
                 }
             }
@@ -153,19 +153,19 @@ class BankTransactionNormalizer
 
         // 4. Formats like dd/mm/yyyy or dd-mm-yyyy or mm/dd/yyyy
         if (preg_match('/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/', $str, $matches)) {
-            $part1 = (int)$matches[1];
-            $part2 = (int)$matches[2];
+            $part1 = (int) $matches[1];
+            $part2 = (int) $matches[2];
             $year = $matches[3];
 
             // Default assumption is dd/mm/yyyy
-            $day = str_pad((string)$part1, 2, '0', STR_PAD_LEFT);
-            $month = str_pad((string)$part2, 2, '0', STR_PAD_LEFT);
+            $day = str_pad((string) $part1, 2, '0', STR_PAD_LEFT);
+            $month = str_pad((string) $part2, 2, '0', STR_PAD_LEFT);
 
             // If part1 > 12, it must be day
             if ($part1 <= 12 && $part2 > 12) {
                 // mm/dd/yyyy
-                $month = str_pad((string)$part1, 2, '0', STR_PAD_LEFT);
-                $day = str_pad((string)$part2, 2, '0', STR_PAD_LEFT);
+                $month = str_pad((string) $part1, 2, '0', STR_PAD_LEFT);
+                $day = str_pad((string) $part2, 2, '0', STR_PAD_LEFT);
             }
 
             return "{$year}-{$month}-{$day}";
@@ -174,6 +174,7 @@ class BankTransactionNormalizer
         // 5. Try standard PHP DateTimeImmutable
         try {
             $dt = new DateTimeImmutable($str);
+
             return $dt->format('Y-m-d');
         } catch (\Throwable) {
             return null;
@@ -186,7 +187,7 @@ class BankTransactionNormalizer
             return '0.00';
         }
 
-        $str = trim((string)$val);
+        $str = trim((string) $val);
         if ($str === '' || $str === '-' || $str === '--') {
             return '0.00';
         }
@@ -234,7 +235,7 @@ class BankTransactionNormalizer
             }
         }
 
-        $numericVal = (float)$str;
+        $numericVal = (float) $str;
         if ($numericVal < 0) {
             $numericVal = abs($numericVal);
         }

@@ -25,10 +25,10 @@ class ProgramController extends Controller
         }
 
         if ($request->filled('q')) {
-            $search = '%' . $request->query('q') . '%';
+            $search = '%'.$request->query('q').'%';
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'ilike', $search)
-                  ->orWhere('code', 'ilike', $search);
+                    ->orWhere('code', 'ilike', $search);
             });
         }
 

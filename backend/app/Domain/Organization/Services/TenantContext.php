@@ -8,7 +8,9 @@ use Closure;
 class TenantContext
 {
     protected static ?int $tenantId = null;
+
     protected static ?Organization $tenant = null;
+
     protected static bool $bypassScoping = false;
 
     public static function setTenantId(?int $tenantId): void

@@ -4,13 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Audit\Services\AuditService;
 use App\Domain\Organization\Models\Organization;
-use App\Domain\Organization\Models\Role;
 use App\Domain\Organization\Services\TenantContext;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -26,19 +24,19 @@ class AuthController extends Controller
 
         $user = User::with(['organization', 'roles.permissions'])->where('email', $validated['email'])->first();
 
-        if (!$user || !Hash::check($validated['password'], $user->password)) {
+        if (! $user || ! Hash::check($validated['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['Kredensial yang diberikan tidak cocok dengan data kami.'],
             ]);
         }
 
-        if (!$user->is_active) {
+        if (! $user->is_active) {
             return response()->json([
                 'message' => 'Akun Anda dinonaktifkan. Silakan hubungi administrator.',
             ], 403);
         }
 
-        if ($user->organization && !$user->organization->is_active && !$user->isSuperAdmin()) {
+        if ($user->organization && ! $user->organization->is_active && ! $user->isSuperAdmin()) {
             return response()->json([
                 'message' => 'Organisasi Anda sedang dinonaktifkan. Silakan hubungi administrator.',
             ], 403);
@@ -53,7 +51,7 @@ class AuthController extends Controller
             action: 'AUTH_LOGIN',
             modelType: User::class,
             modelId: $user->id,
-            notes: 'Login berhasil via ' . $deviceName,
+            notes: 'Login berhasil via '.$deviceName,
             userId: $user->id,
             organizationId: $user->organization_id
         );
@@ -113,7 +111,7 @@ class AuthController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        if (!$user->isSuperAdmin()) {
+        if (! $user->isSuperAdmin()) {
             return response()->json([
                 'message' => 'Hanya SUPER_ADMIN yang memiliki izin untuk berpindah konteks organisasi.',
             ], 403);

@@ -38,11 +38,11 @@ class RunningBalanceValidator
                 continue;
             }
 
-            $currentBalance = (float)$currentBalanceStr;
-            $amount = (float)$row['amount'];
+            $currentBalance = (float) $currentBalanceStr;
+            $amount = (float) $row['amount'];
             $isCashIn = ($row['direction'] instanceof BankTransactionDirection)
                 ? $row['direction']->isCashIn()
-                : strtoupper((string)$row['direction']) === 'IN';
+                : strtoupper((string) $row['direction']) === 'IN';
 
             if ($prevBalance !== null) {
                 $expected = $isCashIn ? ($prevBalance + $amount) : ($prevBalance - $amount);
@@ -56,7 +56,7 @@ class RunningBalanceValidator
                         'reported_balance' => number_format($currentBalance, 2, '.', ''),
                         'discrepancy' => number_format($diff, 2, '.', ''),
                         'message' => sprintf(
-                            "Running balance discrepancy at row %d: expected %s, reported %s (diff: %s)",
+                            'Running balance discrepancy at row %d: expected %s, reported %s (diff: %s)',
                             $row['row_index'],
                             number_format($expected, 2, '.', ''),
                             number_format($currentBalance, 2, '.', ''),

@@ -9,13 +9,14 @@ use App\Domain\Counterparty\Models\Counterparty;
 use App\Domain\Fund\Models\Fund;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Traits\BelongsToTenant;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ClassificationRule extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     protected $table = 'classification_rules';
 
@@ -39,6 +40,13 @@ class ClassificationRule extends Model
         'auto_post',
         'confidence',
         'description',
+        'version',
+        'created_by',
+        'approved_by',
+        'approved_at',
+        'effective_from',
+        'effective_to',
+        'max_auto_post_amount',
     ];
 
     protected $casts = [
@@ -46,6 +54,11 @@ class ClassificationRule extends Model
         'is_active' => 'boolean',
         'auto_post' => 'boolean',
         'confidence' => 'float',
+        'version' => 'integer',
+        'approved_at' => 'datetime',
+        'effective_from' => 'date:Y-m-d',
+        'effective_to' => 'date:Y-m-d',
+        'max_auto_post_amount' => 'string',
     ];
 
     public function organization(): BelongsTo
@@ -78,12 +91,39 @@ class ClassificationRule extends Model
         return $this->belongsTo(Fund::class, 'fund_id');
     }
 
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function approver(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function toSnapshot(): array
+    {
+        return [
+            'rule_id' => $this->id,
+            'organization_id' => $this->organization_id,
+            'version' => (int) ($this->version ?? 1),
+            'pattern' => $this->pattern,
+            'pattern_type' => $this->pattern_type,
+            'transaction_type' => $this->transaction_type,
+            'target_account_id' => $this->target_account_id,
+            'auto_post' => (bool) $this->auto_post,
+            'max_auto_post_amount' => (string) ($this->max_auto_post_amount ?? '0.00'),
+            'approved_by' => $this->approved_by,
+            'approved_at' => $this->approved_at ? $this->approved_at->format('Y-m-d H:i:s') : null,
+        ];
+    }
+
     /**
      * Evaluate whether this rule matches the given BankTransaction.
      */
     public function matches(BankTransaction $tx): bool
     {
-        if (!$this->is_active) {
+        if (! $this->is_active) {
             return false;
         }
 

@@ -22,7 +22,7 @@ class TransactionCategoryService
             $orgId = (int) $data['organization_id'];
 
             $direction = strtoupper($data['direction'] ?? '');
-            if (!in_array($direction, TransactionCategory::ALL_DIRECTIONS, true)) {
+            if (! in_array($direction, TransactionCategory::ALL_DIRECTIONS, true)) {
                 throw new InvalidArgumentException("Invalid transaction category direction '{$direction}'. Must be IN, OUT, or TRANSFER.");
             }
 
@@ -68,12 +68,12 @@ class TransactionCategoryService
             $orgId = (int) $category->organization_id;
 
             if (array_key_exists('organization_id', $data) && (int) $data['organization_id'] !== $orgId) {
-                throw new CrossTenantViolationException("Cannot change organization of transaction category.");
+                throw new CrossTenantViolationException('Cannot change organization of transaction category.');
             }
 
             if (isset($data['direction'])) {
                 $data['direction'] = strtoupper($data['direction']);
-                if (!in_array($data['direction'], TransactionCategory::ALL_DIRECTIONS, true)) {
+                if (! in_array($data['direction'], TransactionCategory::ALL_DIRECTIONS, true)) {
                     throw new InvalidArgumentException("Invalid transaction category direction '{$data['direction']}'.");
                 }
             }

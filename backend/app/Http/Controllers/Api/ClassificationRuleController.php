@@ -34,10 +34,10 @@ class ClassificationRuleController extends Controller
         }
 
         if ($request->filled('q')) {
-            $search = '%' . $request->query('q') . '%';
+            $search = '%'.$request->query('q').'%';
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', $search)
-                  ->orWhere('pattern', 'like', $search);
+                    ->orWhere('pattern', 'like', $search);
             });
         }
 

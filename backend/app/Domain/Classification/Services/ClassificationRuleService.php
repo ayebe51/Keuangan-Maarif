@@ -25,18 +25,18 @@ class ClassificationRuleService
 
             $txType = $data['transaction_type'] ?? '';
             $bizType = BusinessTransactionType::tryFrom($txType);
-            if (!$bizType) {
+            if (! $bizType) {
                 throw new InvalidArgumentException("Invalid transaction type '{$txType}'.");
             }
 
             $direction = isset($data['direction']) ? strtoupper($data['direction']) : null;
-            if ($direction && !$bizType->isDirectionAllowed($direction)) {
+            if ($direction && ! $bizType->isDirectionAllowed($direction)) {
                 throw new InvalidClassificationDirectionException(
                     "Direction '{$direction}' is incompatible with transaction type '{$txType}'."
                 );
             }
 
-            if (!empty($data['target_account_id'])) {
+            if (! empty($data['target_account_id'])) {
                 $this->accountService->ensurePostable((int) $data['target_account_id'], $orgId);
             }
 
@@ -83,12 +83,12 @@ class ClassificationRuleService
             $orgId = (int) $rule->organization_id;
 
             if (array_key_exists('organization_id', $data) && (int) $data['organization_id'] !== $orgId) {
-                throw new CrossTenantViolationException("Cannot change organization of classification rule.");
+                throw new CrossTenantViolationException('Cannot change organization of classification rule.');
             }
 
             $txType = $data['transaction_type'] ?? $rule->transaction_type;
             $bizType = BusinessTransactionType::tryFrom($txType);
-            if (!$bizType) {
+            if (! $bizType) {
                 throw new InvalidArgumentException("Invalid transaction type '{$txType}'.");
             }
 
@@ -96,13 +96,13 @@ class ClassificationRuleService
                 ? ($data['direction'] !== null ? strtoupper($data['direction']) : null)
                 : $rule->direction;
 
-            if ($direction && !$bizType->isDirectionAllowed($direction)) {
+            if ($direction && ! $bizType->isDirectionAllowed($direction)) {
                 throw new InvalidClassificationDirectionException(
                     "Direction '{$direction}' is incompatible with transaction type '{$txType}'."
                 );
             }
 
-            if (!empty($data['target_account_id'])) {
+            if (! empty($data['target_account_id'])) {
                 $this->accountService->ensurePostable((int) $data['target_account_id'], $orgId);
             }
 
