@@ -405,3 +405,271 @@ class JournalPostingService
 
             // 13. Update BusinessTransaction Linkage & Posting State
             $businessTransaction->status = 'posted';
+            $businessTransaction->posted_journal_entry_id = $lockedEntry->id;
+            $businessTransaction->posted_at = $lockedEntry->posted_at;
+            $businessTransaction->posted_by = null;
+            $businessTransaction->save();
+
+            // Synchronize paired transfer twin if present
+            if ($businessTransaction->isTransfer() && $businessTransaction->paired_business_transaction_id) {
+                $twin = BusinessTransaction::withoutGlobalScopes()->find($businessTransaction->paired_business_transaction_id);
+                if ($twin && ! $twin->isPosted()) {
+                    $twin->status = 'posted';
+                    $twin->posted_journal_entry_id = $lockedEntry->id;
+                    $twin->posted_at = $lockedEntry->posted_at;
+                    $twin->posted_by = null;
+                    $twin->save();
+                }
+            }
+
+            // 14. Record Audit Event: JOURNAL_POSTED_AUTOMATED (SYSTEM_DAEMON)
+            AuditService::logSystem(
+                action: 'JOURNAL_POSTED_AUTOMATED',
+                modelType: JournalEntry::class,
+                modelId: $lockedEntry->id,
+                oldValues: $beforeEntry,
+                newValues: array_merge($lockedEntry->fresh()->toArray(), [
+                    'executor' => 'SYSTEM_DAEMON',
+                    'posted_by_rule_id' => $rule->id,
+                    'rule_version' => $rule->version,
+                    'rule_approver_id' => $rule->approved_by,
+                    'rule_creator_id' => $rule->created_by,
+                    'transaction_maker_id' => (int) $makerId,
+                    'business_transaction_id' => $businessTransaction->id,
+                    'amount' => $businessTransaction->amount,
+                    'currency' => 'IDR',
+                    'source_provenance' => 'journal_entry_sources',
+                    'authorization_decision' => 'APPROVED_AUTOMATED',
+                ]),
+                notes: "System automated journal posting authorized by Rule #{$rule->id} (v{$rule->version})",
+                organizationId: $orgId
+            );
+
+            return $lockedEntry->fresh(['lines']);
+        });
+    }
+
+    public function reverse(JournalEntry $originalEntry, User $user, ?string $reversalDate = null, string $reason = ''): JournalEntry
+    {
+        return DB::transaction(function () use ($originalEntry, $user, $reversalDate, $reason) {
+            $orgId = (int) $originalEntry->organization_id;
+
+            // Guard 1: Must not already be reversed (DEC-003 & AT-012)
+            if ($originalEntry->isReversed() || $originalEntry->reversed_entry_id !== null) {
+                throw new AlreadyReversedException($originalEntry->entry_number);
+            }
+
+            // Guard 2: Status must be POSTED
+            if (! $originalEntry->isPosted()) {
+                throw new InvalidArgumentException("Only POSTED journals can be reversed. Current status: {$originalEntry->status}.");
+            }
+
+            // Guard 3: Segregation of Duties on reversal (Original maker cannot reverse without check)
+            if ((int) $originalEntry->created_by === (int) $user->id && ! $user->isSuperAdmin()) {
+                throw new SegregationOfDutiesException($user->id, $originalEntry->entry_number, 'Maker cannot reverse their own posted journal.');
+            }
+
+            // Guard 4: Target reversal date must be in OPEN fiscal period (DEC-003 & GAP-004) with row-level lock against TOCTOU
+            if ($reversalDate) {
+                $effectiveDate = $reversalDate;
+                $fiscalPeriod = $this->fiscalPeriodService->ensureDateInOpenPeriod($effectiveDate, $orgId, lockForUpdate: true);
+            } else {
+                // Try now() or current open period
+                $today = now()->format('Y-m-d');
+                $openPeriod = FiscalPeriod::withoutGlobalScopes()
+                    ->where('organization_id', $orgId)
+                    ->open()
+                    ->where('start_date', '<=', $today)
+                    ->where('end_date', '>=', $today)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($openPeriod) {
+                    $effectiveDate = $today;
+                    $fiscalPeriod = $openPeriod;
+                } else {
+                    $currentPeriod = FiscalPeriod::withoutGlobalScopes()
+                        ->where('organization_id', $orgId)
+                        ->open()
+                        ->where('is_current', true)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $currentPeriod) {
+                        throw new ClosedFiscalPeriodException($today, 'closed', 'No open fiscal period available for reversal.');
+                    }
+                    $effectiveDate = $currentPeriod->end_date->format('Y-m-d');
+                    $fiscalPeriod = $currentPeriod;
+                }
+            }
+
+            $year = (int) Carbon::parse($effectiveDate)->format('Y');
+            $reversalNumber = $this->allocator->allocate($orgId, $year);
+
+            // 1. Create Reversal Journal Entry as DRAFT first so lines can be added
+            $reversalEntry = JournalEntry::create([
+                'organization_id' => $orgId,
+                'fiscal_period_id' => $fiscalPeriod->id,
+                'entry_number' => $reversalNumber,
+                'entry_date' => $effectiveDate,
+                'entry_type' => JournalEntry::TYPE_REVERSAL,
+                'reference' => 'REV:'.$originalEntry->entry_number,
+                'description' => 'Reversal of '.$originalEntry->entry_number.($reason ? ' - '.$reason : ''),
+                'status' => JournalEntry::STATUS_DRAFT,
+                'reversed_entry_id' => $originalEntry->id,
+                'created_by' => $user->id,
+            ]);
+
+            // 2. Mirror lines (Debit <-> Credit)
+            $originalLines = $originalEntry->lines()->orderBy('line_number')->get();
+            foreach ($originalLines as $origLine) {
+                JournalLine::create([
+                    'organization_id' => $orgId,
+                    'journal_entry_id' => $reversalEntry->id,
+                    'line_number' => $origLine->line_number,
+                    'account_id' => $origLine->account_id,
+                    'debit' => $origLine->credit, // Mirrored
+                    'credit' => $origLine->debit, // Mirrored
+                    'description' => 'Reversal line of '.$origLine->line_number,
+                    'bank_account_id' => $origLine->bank_account_id,
+                    'counterparty_id' => $origLine->counterparty_id,
+                    'fund_id' => $origLine->fund_id,
+                    'receivable_id' => $origLine->receivable_id,
+                ]);
+            }
+
+            // 3. Post reversal entry
+            $reversalEntry->status = JournalEntry::STATUS_POSTED;
+            $reversalEntry->posted_at = now();
+            $reversalEntry->posted_by = $user->id;
+            $reversalEntry->save();
+
+            // 4. Mark original as reversed via dedicated domain method
+            $originalEntry->markAsReversed($reversalEntry->id);
+
+            // 4. Audit Log
+            AuditService::log(
+                action: 'JOURNAL_REVERSED',
+                modelType: JournalEntry::class,
+                modelId: $originalEntry->id,
+                oldValues: ['status' => JournalEntry::STATUS_POSTED],
+                newValues: ['status' => JournalEntry::STATUS_REVERSED, 'reversed_entry_id' => $reversalEntry->id],
+                notes: $reason,
+                userId: $user->id,
+                organizationId: $orgId
+            );
+
+            return $reversalEntry->fresh(['lines']);
+        });
+    }
+
+    /**
+     * Shared double-entry accounting invariants verification routine.
+     * Enforces:
+     * - Minimum 2 lines
+     * - Leaf postable account check (and tenancy check)
+     * - Line dimension tenancy checks
+     * - Exactly one positive side (debit or credit) per line
+     * - Sum(debit) == Sum(credit) > 0
+     *
+     * @return array{totalDebit: Money, totalCredit: Money, lines: Collection}
+     */
+    protected function validateDoubleEntryInvariants(JournalEntry $entry, int $orgId): array
+    {
+        $lines = $entry->lines()->get();
+        if ($lines->count() < 2) {
+            throw new InvalidArgumentException('Journal must contain at least 2 lines to form a valid double-entry.');
+        }
+
+        $totalDebit = Money::zero();
+        $totalCredit = Money::zero();
+
+        foreach ($lines as $line) {
+            $this->accountService->ensurePostable($line->account_id, $orgId);
+            $this->validateDimensionTenancy($line, $orgId);
+
+            $debit = Money::of($line->debit);
+            $credit = Money::of($line->credit);
+
+            if (($debit->isPositive() && $credit->isPositive()) || ($debit->isZero() && $credit->isZero())) {
+                throw new InvalidArgumentException("Line {$line->line_number} must have exactly one positive side (debit or credit).");
+            }
+
+            $totalDebit = $totalDebit->add($debit);
+            $totalCredit = $totalCredit->add($credit);
+        }
+
+        if (! $totalDebit->equals($totalCredit)) {
+            throw new UnbalancedJournalException($totalDebit->getAmount(), $totalCredit->getAmount());
+        }
+
+        if ($totalDebit->isZero()) {
+            throw new UnbalancedJournalException('0.00', '0.00', 'Total journal balance cannot be zero.');
+        }
+
+        return [
+            'totalDebit' => $totalDebit,
+            'totalCredit' => $totalCredit,
+            'lines' => $lines,
+        ];
+    }
+
+    private function validateAndCreateLine(JournalEntry $entry, array $lineData, int $lineNumber): JournalLine
+    {
+        $orgId = (int) $entry->organization_id;
+        $accountId = (int) $lineData['account_id'];
+
+        // Postability & Tenancy check on Account
+        $this->accountService->ensurePostable($accountId, $orgId);
+
+        $debit = Money::of($lineData['debit'] ?? '0.00');
+        $credit = Money::of($lineData['credit'] ?? '0.00');
+
+        if (($debit->isPositive() && $credit->isPositive()) || ($debit->isZero() && $credit->isZero())) {
+            throw new InvalidArgumentException("Line {$lineNumber} must have exactly one positive side (debit or credit).");
+        }
+
+        $line = new JournalLine([
+            'organization_id' => $orgId,
+            'journal_entry_id' => $entry->id,
+            'line_number' => $lineNumber,
+            'account_id' => $accountId,
+            'debit' => $debit->getAmount(),
+            'credit' => $credit->getAmount(),
+            'description' => $lineData['description'] ?? null,
+            'bank_account_id' => $lineData['bank_account_id'] ?? null,
+            'counterparty_id' => $lineData['counterparty_id'] ?? null,
+            'fund_id' => $lineData['fund_id'] ?? null,
+            'receivable_id' => $lineData['receivable_id'] ?? null,
+        ]);
+
+        $this->validateDimensionTenancy($line, $orgId);
+        $line->save();
+
+        return $line;
+    }
+
+    private function validateDimensionTenancy(JournalLine $line, int $organizationId): void
+    {
+        if ($line->bank_account_id) {
+            $bank = DB::table('bank_accounts')->where('id', $line->bank_account_id)->first();
+            if (! $bank || (int) $bank->organization_id !== $organizationId) {
+                throw new CrossTenantViolationException("Bank Account {$line->bank_account_id} belongs to a different organization.");
+            }
+        }
+
+        if ($line->fund_id) {
+            $fund = DB::table('funds')->where('id', $line->fund_id)->first();
+            if (! $fund || (int) $fund->organization_id !== $organizationId) {
+                throw new CrossTenantViolationException("Fund {$line->fund_id} belongs to a different organization.");
+            }
+        }
+
+        if ($line->counterparty_id) {
+            $cp = DB::table('counterparties')->where('id', $line->counterparty_id)->first();
+            if (! $cp || (int) $cp->organization_id !== $organizationId) {
+                throw new CrossTenantViolationException("Counterparty {$line->counterparty_id} belongs to a different organization.");
+            }
+        }
+    }
+}
