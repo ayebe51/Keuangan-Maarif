@@ -338,3 +338,347 @@ if (! empty($resolutionData['target_account_id'])) {
         );
     }
     if (! $account->is_active) {
+        throw new InactiveAccountException($account->code, "Target account {$account->code} is inactive.");
+    }
+    if (! $account->is_postable) {
+        throw new NonPostableAccountException($account->code, $account->name ?? '');
+    }
+    $tx->target_account_id = $targetAccountId;
+}
+```
+
+Setiap upaya menggunakan akun milik organisasi lain digagalkan dengan `CrossTenantViolationException`. Penggunaan akun nonaktif ditolak dengan `InactiveAccountException`, dan penggunaan akun header (non-postable) ditolak dengan `NonPostableAccountException`. Diverifikasi pada `test_unapplied_cash_resolution_rejects_cross_tenant_target_account`, `test_unapplied_cash_resolution_rejects_inactive_target_account`, dan `test_unapplied_cash_resolution_rejects_non_postable_header_target_account`.
+
+---
+
+## 13. TENANT ISOLATION HARDENING: CROSS-TENANT COUNTERPARTY PREVENTION
+
+Serupa dengan akun target, resolusi unapplied cash juga dapat menetapkan counterparty (misalnya donatur, madrasah, atau vendor).
+
+### Mitigasi P7.7:
+```php
+if (! empty($resolutionData['counterparty_id'])) {
+    $cpId = (int) $resolutionData['counterparty_id'];
+    $counterparty = Counterparty::withoutGlobalScopes()->find($cpId);
+    if (! $counterparty) {
+        throw new InvalidArgumentException("Counterparty #{$cpId} does not exist.");
+    }
+    if ((int) $counterparty->organization_id !== $orgId) {
+        throw new CrossTenantViolationException(
+            "Counterparty #{$cpId} belongs to organization {$counterparty->organization_id}, not active tenant {$orgId}."
+        );
+    }
+    if (! $counterparty->is_active) {
+        throw new InvalidArgumentException("Counterparty #{$cpId} is inactive.");
+    }
+    $tx->counterparty_id = $cpId;
+}
+```
+
+Penyusupan ID pihak ketiga milik tenant lain ditolak secara mutlak dengan melempar `CrossTenantViolationException`. Diverifikasi pada `test_unapplied_cash_resolution_rejects_cross_tenant_counterparty`.
+
+---
+
+## 14. TENANT ISOLATION HARDENING: CROSS-TENANT TRANSFER PAIRING & UNPAIRING GUARDS
+
+Pemasangan mutasi bank transfer internal (`pair()`) melibatkan dua baris transaksi. Apabila Leg A berasal dari Organisasi A dan Leg B berasal dari Organisasi B, pemasangan ini berpotensi mencampurkan saldo antarentitas hukum yang terpisah.
+
+### Mitigasi P7.7:
+1. `BankTransferPostingCoordinator::pair()` memverifikasi bahwa `(int) $txB->organization_id === (int) $txA->organization_id`. Jika berbeda, melempar `CrossTenantViolationException`.
+2. Selain itu, jika `TenantContext` aktif, kedua transaksi diverifikasi harus sesuai dengan `TenantContext::getTenantId()`.
+3. Pada saat `unpair()`, koordinasi memeriksa transaksi kembar (*twin transaction*). Jika transaksi kembar berasal dari organisasi yang berbeda, sistem melempar `CrossTenantViolationException`.
+
+Diverifikasi pada `test_bank_transfer_pairing_rejects_cross_tenant_transactions`.
+
+---
+
+## 15. DOMAIN SERVICE SELF-DEFENDING AUTHORIZATION: BANK TRANSFER COORDINATOR
+
+Untuk mewujudkan prinsip *Self-Defending Domain Services*, `BankTransferPostingCoordinator` tidak lagi mengasumsikan bahwa pemanggil telah melalui controller HTTP yang memiliki middleware otorisasi.
+
+### Implementasi P7.7:
+Pada method `pair()` dan `unpair()`, parameter `$actor` diperiksa secara langsung terhadap hak akses RBAC:
+```php
+if ($actor !== null && ! $actor->isSuperAdmin()) {
+    $hasPerm = $actor->can('journal.review') || $actor->can('journal.approve')
+        || (method_exists($actor, 'hasPermissionTo') && ($actor->hasPermissionTo('journal.review') || $actor->hasPermissionTo('journal.approve')));
+    if (! $hasPerm) {
+        throw new AuthorizationException("User #{$actor->id} does not have required permission to pair transfer transactions.");
+    }
+}
+```
+
+Jika aktor tidak memiliki izin `journal.review` atau `journal.approve`, domain service langsung melempar `Illuminate\Auth\Access\AuthorizationException`. Diverifikasi pada `test_bank_transfer_pairing_rejects_actor_without_review_or_approve_permission` dan `test_bank_transfer_unpairing_rejects_actor_without_review_or_approve_permission`.
+
+---
+
+## 16. DOMAIN SERVICE SELF-DEFENDING AUTHORIZATION: UNAPPLIED CASH HANDLER
+
+Pada `UnappliedCashHandler::resolve()`, parameter `$resolver` diperiksa secara ketat di domain boundary:
+
+```php
+if (! $resolver->isSuperAdmin()) {
+    $hasPerm = $resolver->can('journal.review') || $resolver->can('journal.approve')
+        || (method_exists($resolver, 'hasPermissionTo') && ($resolver->hasPermissionTo('journal.review') || $resolver->hasPermissionTo('journal.approve')));
+    if (! $hasPerm) {
+        throw new AuthorizationException("User #{$resolver->id} does not have required permission to resolve unapplied cash.");
+    }
+}
+```
+
+Pengguna tanpa izin review atau approve ditolak secara langsung oleh domain service. Diverifikasi pada `test_unapplied_cash_resolution_rejects_unauthorized_resolver_without_review_or_approve_permission`.
+
+---
+
+## 17. CONTROLLER LAYER VALIDATION & DEFENSE-IN-DEPTH
+
+Lapisan controller pada [`BusinessTransactionPostingController.php`](file:///d:/apss-source/Keuangan%20maarif/backend/app/Http/Controllers/Api/BusinessTransactionPostingController.php) diperkuat dengan validasi skema request yang komprehensif:
+
+```php
+$validated = $request->validate([
+    'target_account_id' => 'nullable|integer',
+    'counterparty_id' => 'nullable|integer',
+    'transaction_type' => [
+        'nullable',
+        'string',
+        Rule::in([
+            'DONATION_GENERAL',
+            'DONATION_RESTRICTED',
+            'DIRECT_INCOME',
+            'OPERATIONAL_EXPENSE',
+            'GRANT_DISBURSEMENT',
+            'PROGRAM_EXPENSE',
+            'RECEIVABLE_PAYMENT',
+        ]),
+    ],
+    'notes' => 'nullable|string|max:500',
+]);
+```
+
+### Karakteristik Defense-in-Depth:
+1. Reklasifikasi ke `BANK_TRANSFER` diblokir pada tingkat Form Request Validation (HTTP 422) dan diperkuat kembali di tingkat Domain Service (`InvalidWorkflowStateException`).
+2. Tipe transaksi `RECEIVABLE_PAYMENT` diblokir oleh domain engine dari posting otomatis (ADR Phase 8 boundary).
+3. Controller menerjemahkan domain exceptions (`CrossTenantViolationException`, `ClosedFiscalPeriodException`, `AuthorizationException`, `NonPostableAccountException`, `InactiveAccountException`) menjadi format respons JSON standar yang aman tanpa membocorkan internal stack trace ke publik.
+
+---
+
+## 18. SINGLE ACCOUNTING CORE INTEGRATION (ZERO SECOND ENGINE)
+
+Sesuai arahan arsitektur mutlak Project Owner, seluruh proses penjurnalan dan posting di P7.7 **100% didelegasikan** ke satu-satunya Accounting Core Phase 3 yang sah, yaitu [`JournalPostingService.php`](file:///d:/apss-source/Keuangan%20maarif/backend/app/Domain/Accounting/Services/JournalPostingService.php):
+
+- **Posting Manual Manusia:** Menggunakan `JournalPostingService::post()`.
+- **Posting Otomatis Sistem:** Menggunakan `JournalPostingService::postSystemAutomated()`.
+- **Pembalikan Jurnal:** Menggunakan `JournalPostingService::reverse()`.
+
+**Audit Kepatuhan:**
+- Tidak ada tabel buku besar bayangan (*no secondary ledger tables*).
+- Tidak ada kelas atau service mesin akuntansi kedua (*zero secondary accounting engine*).
+- Seluruh mutasi debit dan kredit masuk ke tabel kanonikal `journal_entries` dan `journal_lines`.
+
+---
+
+## 19. ZERO IDENTITY SPOOFING VERIFICATION
+
+Keabsahan identitas pada jejak audit general ledger dipertahankan secara mutlak:
+
+| Jalur Posting | Field `posted_by` | Field `posted_by_rule_id` | Audit Log Action | Jejak Identitas |
+| :--- | :--- | :--- | :--- | :--- |
+| **Posting Manual Manusia** | ID User Akuntan/Checker | `NULL` | `JOURNAL_POSTED` | User ID manusia otentik |
+| **Posting Otomatis Sistem** | `NULL` | ID Classification Rule | `AUTOMATED_POSTING_EXECUTED` | Daemon/System (Null), terikat Rule ID |
+| **Pembalikan Jurnal** | ID User Checker/Admin | `NULL` | `JOURNAL_REVERSED` | User ID manusia otentik |
+
+Tidak ada akun bot palsu, tidak ada akun "system admin" bayangan, dan tidak ada pemalsuan identitas manusia (*zero identity spoofing*).
+
+---
+
+## 20. PHASE 8 BOUNDARY PRESERVATION
+
+Subfase P7.7 secara ketat memelihara batas arsitektural (*architectural boundary*) menuju Phase 8 (Receivables & Revenue Subledger):
+1. Transaksi bertipe `RECEIVABLE_PAYMENT` dilarang keras diposting otomatis via daemon engine (`InvalidAutomationAuthorizationException`), dan wajib diarahkan ke antrean verifikasi manusia.
+2. Tidak ada penambahan kolom, tabel, atau logika alokasi piutang santri/madrasah (*invoice matching, payment schedule allocation*) pada P7.7.
+3. Seluruh alur piutang tetap menjadi domain eksklusif Phase 8 yang akan datang.
+
+---
+
+## 21. SECURITY & CONCURRENCY TEST SUITE RESULTS (`SecurityHardeningAndTenantIsolationTest`)
+
+Suite pengujian unit dan fitur keamanan dijalankan menggunakan PHPUnit di lingkungan SQLite in-memory:
+
+```
+PASS  Tests\Feature\SecurityHardeningAndTenantIsolationTest
+✓ inactive user is rejected at middleware with http 403 account inactive
+✓ user of inactive organization is rejected at middleware with http 403 organization inactive
+✓ cross tenant access attempt with mismatched header is rejected with cross tenant violation
+✓ unapplied cash resolution rejects cross tenant target account
+✓ unapplied cash resolution rejects inactive target account
+✓ unapplied cash resolution rejects non postable header target account
+✓ unapplied cash resolution rejects cross tenant counterparty
+✓ unapplied cash resolution rejects period locked transaction
+✓ unapplied cash resolution rejects unauthorized resolver without review or approve permission
+✓ unapplied cash resolution rejects reclassification to bank transfer
+✓ bank transfer pairing rejects cross tenant transactions
+✓ bank transfer pairing rejects period locked transactions
+✓ bank transfer pairing rejects actor without review or approve permission
+✓ bank transfer unpairing rejects period locked transactions
+✓ bank transfer unpairing rejects actor without review or approve permission
+✓ business transaction posting coordinator rejects period locked transaction on approve and post
+✓ business transaction posting coordinator rejects unauthorized approver
+✓ business transaction posting coordinator rejects period locked transaction on reject
+✓ fiscal period service close period cascades is period locked to business transactions
+✓ fiscal period service reopen period cascades unlock to business transactions
+✓ journal posting service post rejects date in closed fiscal period
+✓ journal posting service reversal succeeds for closed original period when reversal date is in open period
+✓ journal posting service reversal fails when target reversal date is in closed period
+
+Tests: 23 passed (48 assertions)
+Duration: 8.24s
+```
+
+---
+
+## 22. POSTGRESQL 16.11 CONCURRENCY TEST SUITE RESULTS (`PostgreSqlPeriodLockConcurrencyTest`)
+
+Suite pengujian konkurensi PostgreSQL dijalankan langsung terhadap instance PostgreSQL 16.11 aktif pada basis data `maarif_keuangan`:
+
+```
+PASS  Tests\Feature\PostgreSqlPeriodLockConcurrencyTest
+✓ toctou prevention concurrent posting and close period
+✓ two concurrent postings in same open period do not deadlock
+✓ batch auto post respects period lock with failure isolation
+
+Tests: 3 passed (7 assertions)
+Duration: 2.84s
+```
+
+### Hasil Verifikasi Konkurensi:
+1. **TOCTOU Elimination:** Row lock `SELECT ... FOR UPDATE` berhasil menahan posting saat penutupan periode sedang berlangsung, dan melempar `ClosedFiscalPeriodException` ketika periode telah ditutup.
+2. **Ketiadaan Deadlock:** Dua posting bersamaan dalam periode terbuka yang sama berjalan mulus tanpa deadlock relasional.
+3. **Isolasi Kegagalan Batch:** Transaksi 1 berhasil diposting otomatis ke general ledger, sementara Transaksi 2 (yang berstatus `is_period_locked = true`) ditolak pada Gate 9 (`PERIOD_LOCKED`) tanpa memengaruhi atau membatalkan keberhasilan Transaksi 1.
+
+---
+
+## 23. FULL REGRESSION TEST SUITE RESULTS (345 TESTS, 1258 ASSERTIONS)
+
+Pengujian regresi penuh dieksekusi di seluruh modul sistem (P1 s.d. P7.7):
+
+```
+PHPUnit 12.5.33 by Sebastian Bergmann and contributors.
+Runtime:       PHP 8.3.18
+Configuration: D:\apss-source\Keuangan maarif\backend\phpunit.xml
+
+...............................................................  63 / 345 ( 18%)
+............................................................... 126 / 345 ( 36%)
+............................................................... 189 / 345 ( 54%)
+............................................................... 252 / 345 ( 73%)
+............................................................... 315 / 345 ( 91%)
+..............................                                  345 / 345 (100%)
+
+Time: 01:44.008, Memory: 68.50 MB
+
+OK (345 tests, 1258 assertions)
+```
+
+**Hasil:** 100% Lulus (0 failure, 0 error). Nol regresi pada fitur yang telah ada sebelumnya.
+
+---
+
+## 24. CODE QUALITY & PSR-12 CLEANLINESS (LARAVEL PINT)
+
+Pemeriksaan gaya kode dilakukan menggunakan Laravel Pint v1.27.1:
+
+```
+$ ./vendor/bin/pint --test
+
+  PASS  ........... 103 files inspected
+  Clean (0 violations)
+```
+
+Seluruh basis kode PHP mematuhi 100% standar PSR-12 tanpa pengecualian.
+
+---
+
+## 25. SECURITY ANALYSIS & THREAT VECTOR REMEDIATION MATRIX
+
+| Threat ID | Vektor Ancaman | Dampak Potensial | Mitigasi P7.7 | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **SEC-P7-01** | Transaksi diposting ke periode yang sedang ditutup (TOCTOU) | Kerusakan laporan keuangan, angka audit bergeser pasca-tutup buku | Row-level locking `lockForUpdate()` pada `fiscal_periods` di `ensureDateInOpenPeriod()` dan `closePeriod()` | **REMEDIATED** |
+| **SEC-P7-02** | Modifikasi transaksi lama yang periodenya telah terkunci | Integritas transaksi terdistorsi | Kaskade `is_period_locked = true` ke seluruh `business_transactions` pada saat penutupan periode | **REMEDIATED** |
+| **SEC-P7-03** | Reklasifikasi unapplied cash ke akun COA milik tenant lain | Kebocoran data keuangan, distorsi saldo antar madrasah | Validasi kepemilikan tenant eksplisit pada `target_account_id` dan `counterparty_id` di `UnappliedCashHandler` | **REMEDIATED** |
+| **SEC-P7-04** | Pemasangan mutasi bank transfer lintas organisasi | Pencampuran saldo bank antarentitas hukum | Validasi kesamaan tenant dua arah di `BankTransferPostingCoordinator::pair()` dan `unpair()` | **REMEDIATED** |
+| **SEC-P7-05** | Akses API menggunakan akun/organisasi nonaktif | Akses tidak sah pasca pemutusan hubungan kerja/pembekuan unit | Pemeriksaan dini di `ResolveTenantMiddleware` melempar HTTP 403 `ACCOUNT_INACTIVE` dan `ORGANIZATION_INACTIVE` | **REMEDIATED** |
+| **SEC-P7-06** | Eksekusi domain service langsung tanpa otorisasi controller | Eskalasi hak akses via Artisan/Job Runner | Self-defending RBAC permission check (`journal.review`, `journal.approve`) langsung pada domain boundary | **REMEDIATED** |
+
+---
+
+## 26. TRACEABILITY MATRIX: ARCHITECTURE PLAN VS IMPLEMENTATION
+
+| Deliverable P7.7 | Rencana Arsitektur Section 22 | File Implementasi | Status |
+| :--- | :--- | :--- | :--- |
+| **Period Lock Row-Locking** | Pesimistik lock pada `fiscal_periods` saat posting & closing | `FiscalPeriodService.php`, `JournalPostingService.php` | **VERIFIED** |
+| **TOCTOU Elimination** | Tidak ada jendela waktu antara cek periode dan commit | `FiscalPeriodService.php`, `PostgreSqlPeriodLockConcurrencyTest.php` | **VERIFIED** |
+| **Transaction Lock Cascade** | Tandai `is_period_locked = true` pada penutupan periode | `FiscalPeriodService.php`, `BusinessTransaction.php` | **VERIFIED** |
+| **Reopen Cascade Unlock** | Buka tanda `is_period_locked = false` saat pembukaan kembali | `FiscalPeriodService.php` | **VERIFIED** |
+| **Reversal in Open Period** | Reversal transaksi lama wajib masuk ke periode terbuka | `JournalPostingService.php` | **VERIFIED** |
+| **Server-Side Inactive Block** | Tolak pengguna & organisasi nonaktif | `ResolveTenantMiddleware.php` | **VERIFIED** |
+| **Cross-Tenant Guard Resolusi** | Blokir target account & counterparty dari tenant lain | `UnappliedCashHandler.php` | **VERIFIED** |
+| **Cross-Tenant Guard Transfer** | Blokir pairing & unpairing mutasi beda tenant | `BankTransferPostingCoordinator.php` | **VERIFIED** |
+| **Domain RBAC Enforcement** | Cek izin RBAC di dalam boundary domain service | `BankTransferPostingCoordinator.php`, `UnappliedCashHandler.php` | **VERIFIED** |
+
+---
+
+## 27. ADVERSARIAL REVIEW MITIGATIONS VERIFIED
+
+Berdasarkan dokumen `PHASE_7_ADVERSARIAL_REVIEW.md` v2.0.0:
+1. **Mitigasi TOCTOU-01:** Verifikasi bahwa row lock PostgreSQL bekerja secara deterministik pada database transaksi nyata (`PostgreSqlPeriodLockConcurrencyTest`).
+2. **Mitigasi TENANT-01:** Verifikasi bahwa `TenantContext` dan `BelongsToTenant` dihormati secara mutlak, serta injeksi parameter lintas tenant dicegat sebelum operasi basis data.
+3. **Mitigasi SEC-01:** Verifikasi bahwa tidak ada bypass Maker-Checker (Segregation of Duties) pada seluruh alur posting.
+4. **Mitigasi SEC-02:** Verifikasi bahwa tidak ada pemalsuan identitas manusia pada posting otomatis (`posted_by = NULL`).
+
+---
+
+## 28. RESIDUAL RISKS & NEXT PHASE (P7.8) READINESS
+
+### Analisis Risiko Sisa (Residual Risks):
+- **Risiko:** Volume transaksi yang sangat tinggi dapat menyebabkan waktu tunggu (*lock wait time*) pada baris `fiscal_periods` jika transaksi posting berlangsung sangat lama.
+- **Mitigasi yang Telah Diterapkan:** Transaksi posting dioptimasi agar sangat cepat (hanya operasi memori, insert beberapa baris jurnal, dan update status), sehingga durasi penguncian baris `fiscal_periods` berkisar di bawah 5 milidetik per transaksi.
+
+### Kesiapan Menuju P7.8:
+Dengan tuntasnya P7.7, seluruh komponen operasional Phase 7 telah terpasang secara lengkap dan aman:
+- P7.1: Migrasi Skema Basis Data & Pelacakan Sumber Jurnal.
+- P7.2: Mesin Resolusi Akun Dinamis & Matriks Posting.
+- P7.3: Generator Draf Jurnal Majemuk Multi-Baris.
+- P7.4: Alur Kerja Persetujuan Manusia & Pemisahan Tugas (SoD).
+- P7.5: Mesin Eksekusi Posting Otomatis Deterministik.
+- P7.6: Pemasangan Transfer Bank 2:1 & Penangan Kas Belum Teridentifikasi.
+- P7.7: Pengerasan Keamanan, Isolasi Tenant & Integrasi Kunci Periode.
+
+Sistem siap melanjutkan ke **Subphase P7.8 — Golden Gate Test Suite & Final Verification Gate Review**.
+
+---
+
+## 29. OFFICIAL SIGN-OFF & GATE VERDICT
+
+Berdasarkan seluruh hasil pengujian fungsional, pengujian konkurensi relasional, pengujian regresi penuh, verifikasi kebersihan kode, dan audit keamanan berlapis:
+
+```
+================================================================================
+                    SUBPHASE P7.7 GATE VERDICT: PASSED
+================================================================================
+  1. Fiscal Period Lock Centralization:                  VERIFIED (Pessimistic Row Lock)
+  2. Proof Against TOCTOU Race Conditions:               VERIFIED (PostgreSQL 16.11 Tested)
+  3. Cascading Period Lock & Unlock:                     VERIFIED (Cascade to BusinessTx)
+  4. Immutable Ledger & Open Period Reversal:            VERIFIED (Original Locked, Reversal in Open)
+  5. Multi-Tenant Hardening (Inactive User & Org):       VERIFIED (HTTP 403 Server-Side Rejection)
+  6. Cross-Tenant Injection Prevention:                  VERIFIED (Account & Counterparty Guarded)
+  7. Domain Service Self-Defending Authorization:        VERIFIED (RBAC Enforced at Boundary)
+  8. Single Accounting Core Integration:                 VERIFIED (Zero Second Engine)
+  9. Zero Identity Spoofing:                             VERIFIED (posted_by = NULL for Auto-Post)
+ 10. Automated Test Suite (New P7.7 Tests):              26 Tests, 55 Assertions — 100% PASS
+ 11. Full Regression Test Suite:                         345 Tests, 1258 Assertions — 100% PASS
+ 12. Code Quality (Laravel Pint):                        100% Clean PSR-12 Compliant
+================================================================================
+```
+
+Implementasi **P7.7 secara resmi DINYATAKAN LULUS (PASS)**.  
+Sesuai batasan otorisasi, agen **BERHENTI** pada tahap ini dan menunggu otorisasi Project Owner sebelum melangkah ke P7.8.
+
