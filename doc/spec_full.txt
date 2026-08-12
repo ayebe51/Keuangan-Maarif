@@ -1,0 +1,1926 @@
+SPESIFIKASI TEKNIS SISTEM KEUANGANREVISION 2 — BANK-STATEMENT-CENTRIC ACCOUNTING
+LP Ma’arif NU PCNU CilacapWorkbook sumber: 3. MARET 2026.xlsxStatus: Baseline teknis untuk pembangunan aplikasi
+
+Item
+Keputusan Rev. 2
+Scope utama
+Kas, 3 rekening BRI, jurnal, piutang, pendapatan, beban, alokasi dana, rekonsiliasi, laporan
+RINCIAN MAKMUR
+DIKELUARKAN dari aplikasi dan migration scope
+Prinsip bank statement
+Kredit bank = uang masuk; Debet bank = uang keluar
+Counterparty
+Disimpan sebagai entitas terpisah dari arah transaksi
+Jurnal
+Selalu mengikuti perspektif LP Ma’arif, bukan perspektif bank
+Import Excel
+Bank statement menjadi sumber input yang dapat dinormalisasi dan dimatching
+Golden test
+Maret 2026 harus dapat direkonstruksi dan direkonsiliasi terhadap workbook
+
+0. Ringkasan Eksekutif
+Revisi 2 memperbaiki model inti aplikasi berdasarkan pembacaan ulang sheet rekening bank. Kesalahan desain yang harus dihindari adalah menyamakan istilah Debet/Kredit pada mutasi bank dengan Debet/Kredit jurnal. Workbook menggunakan kolom Debet/Kredit dari perspektif rekening bank: Kredit menambah saldo rekening, sedangkan Debet mengurangi saldo rekening. Jurnal aplikasi tetap memakai perspektif akuntansi LP Ma’arif.
+Contoh MI Darwata Sindangbarang: Kredit Rp852.000 pada BRI Tabungan berarti MI Darwata adalah PAYER/SETORAN, arah transaksi IN, dan jurnal minimalnya Dr BRI Tabungan Rp852.000 / Cr akun pendapatan atau piutang yang sesuai.
+Contoh Piutang Modul II: Kredit pada bank berarti pembayaran piutang; sistem harus mengurangi outstanding receivable dan mendebit bank.
+Contoh Pajak/Adm Bank: Debet pada bank berarti uang keluar; bank menjadi PAYEE, dan jurnalnya Dr beban / Cr bank.
+Counterparty, direction, transaction type, account mapping, dan bank account harus menjadi atribut terpisah; jangan menjadikan kolom Keterangan sebagai satu-satunya sumber business logic.
+RINCIAN MAKMUR tidak dimigrasikan, tidak dibuatkan modul khusus, dan tidak menjadi dependency laporan aplikasi.
+1. Pemetaan Seluruh 9 Sheet → Modul Aplikasi
+Sheet
+Modul
+Fungsi yang terbaca
+Implementasi
+NERACA AWAL BULAN
+Opening Balance / Master Opening
+Saldo awal aset, piutang lama, alokasi/dana, kewajiban, dan posisi awal periode
+Import saldo awal; opening journal; opening balance validation
+REKAP REK GIRO 308
+Bank & Bank Statement
+Mutasi BRI Giro 308, saldo awal/akhir, kode akun, debet/kredit, rekap kode
+Bank Account; Bank Transaction; Matching; Reconciliation
+REKAP REK GIRO 304
+Bank & Bank Statement
+Mutasi BRI Giro 304, penerimaan piutang, alokasi operasional, biaya, transfer
+Bank Account; Bank Transaction; Allocation; Reconciliation
+REKAP REK TABUNGAN 538
+Bank & Bank Statement
+Mutasi BRI Tabungan, penerimaan pendapatan/piutang, bunga, pajak, admin bank
+Bank Account; Bank Transaction; Receivable; Income; Expense
+JURNAL UMUM & REKAPITULASI
+General Ledger / Journal Engine
+Jurnal double-entry, kode akun, debit/kredit, rekap per akun
+Journal Entry; Journal Line; GL; Posting Engine
+NERACA AKHIR BULAN
+Balance Sheet Reporting
+Posisi aset, piutang, kas/bank, alokasi/kewajiban, dan saldo akhir
+Balance Sheet report
+LAP. ARUS KAS
+Cash Flow Reporting
+Arus kas masuk/keluar berdasarkan akun/aktivitas dan saldo kas akhir
+Cash Flow report; cash movement classification
+RINCIAN KAS RIIL
+Fund/Allocation Position & Cash Position
+Posisi dana menurut kegiatan/barang/alokasi dan rekening sumber
+Fund; Allocation; Restricted/Designated balance; Position report
+RINCIAN MAKMUR
+EXCLUDED
+Tidak dimasukkan ke aplikasi
+Tidak ada table/module/migration rule
+1.1. Arsitektur sumber data setelah Rev. 2
+BANK STATEMENT / INPUT TRANSACTION        |        vNORMALIZATION  - bank_account  - date  - debit / credit  - amount  - raw description        |        +--> DIRECTION: IN / OUT / TRANSFER        |        +--> COUNTERPARTY + ROLE        |        +--> TRANSACTION TYPE        |        +--> MATCHING (AR / FUND / EXPENSE / INCOME)        |        vJOURNAL POSTING ENGINE        |        +--> GENERAL LEDGER        +--> RECEIVABLE        +--> FUND / ALLOCATION        +--> BANK RECONCILIATION        +--> REPORTING
+2. Master Chart of Accounts 1100–5000
+Workbook mengandung 225 kandidat kode akun 4 digit pada rentang 1100–5999 setelah mengecualikan nilai yang jelas merupakan tahun/nominal (2026, 5539, 5900). Sebanyak 44 kode digunakan langsung dalam transaksi bank/jurnal Maret 2026. Kode lain diperlakukan sebagai legacy/reference dan tidak boleh dihapus karena dibutuhkan untuk histori.
+2.1. Prinsip desain COA baru
+Kode lama dipertahankan sebagai legacy_code agar laporan historis tetap dapat direkonstruksi.
+Nama akun baru memiliki canonical_name; perubahan nama tidak mengubah kode lama.
+Akun 22xx diperlakukan sebagai allocation/fund liability/deferred-use bucket sampai mapping akuntansi final disahkan; jangan dipaksa menjadi revenue atau expense.
+Akun 5000 memiliki penggunaan campuran di workbook (misalnya Pend. Buku Ramadhan dan Alokasi Ops Buku Ramadhan). Karena itu 5000 harus diberi flag LEGACY_MIXED dan pada aplikasi baru dipetakan ke akun yang lebih spesifik berdasarkan transaction type.
+Akun 2500, 3000, 31xx–33xx dan akun lain yang historisnya bercampur harus melalui mapping approval sebelum posting otomatis.
+Kode
+Kelompok
+Nama Canonical
+Status
+1101
+1xxx — Aset / Piutang
+Kas
+ACTIVE MARET 2026
+1102
+1xxx — Aset / Piutang
+BMT
+LEGACY / REFERENCE
+1103
+1xxx — Aset / Piutang
+BRI Tabungan
+ACTIVE MARET 2026
+1104
+1xxx — Aset / Piutang
+BRI Giro
+ACTIVE MARET 2026
+1105
+1xxx — Aset / Piutang
+BRI Giro 308
+ACTIVE MARET 2026
+1203
+1xxx — Aset / Piutang
+Piutang Batik Siswa 2015
+LEGACY / REFERENCE
+1209
+1xxx — Aset / Piutang
+Piutang Batik Siswa 2016
+LEGACY / REFERENCE
+1215
+1xxx — Aset / Piutang
+Piutang PTS II MI 2016/2017
+LEGACY / REFERENCE
+1217
+1xxx — Aset / Piutang
+Piutang UKK MI 2016/2017
+LEGACY / REFERENCE
+1218
+1xxx — Aset / Piutang
+Piutang UKK MTs 2016/2017
+LEGACY / REFERENCE
+1219
+1xxx — Aset / Piutang
+Piutang UM ke NUan 2016/2017
+LEGACY / REFERENCE
+1220
+1xxx — Aset / Piutang
+Piutang Batik Siswa  2017
+LEGACY / REFERENCE
+1224
+1xxx — Aset / Piutang
+Piutang PTS I 2017/2018
+LEGACY / REFERENCE
+1225
+1xxx — Aset / Piutang
+Piutang UAS I 2017/2018
+LEGACY / REFERENCE
+1226
+1xxx — Aset / Piutang
+Piutang Buku ke Nuan
+LEGACY / REFERENCE
+1229
+1xxx — Aset / Piutang
+Piutang Batik Guru
+LEGACY / REFERENCE
+1230
+1xxx — Aset / Piutang
+Piutang PTS II MI 2017/2018
+LEGACY / REFERENCE
+1231
+1xxx — Aset / Piutang
+Piutang PAT kelas 6 2017/2018
+LEGACY / REFERENCE
+1232
+1xxx — Aset / Piutang
+Piutang UM ke NUan 2017/2018
+LEGACY / REFERENCE
+1233
+1xxx — Aset / Piutang
+Piutang UAS kelas IX ke Nuan 2017/2018
+LEGACY / REFERENCE
+1234
+1xxx — Aset / Piutang
+Piutang UKK MI 2017/2018
+LEGACY / REFERENCE
+1235
+1xxx — Aset / Piutang
+Piutang UKK MTs 2017/2018
+LEGACY / REFERENCE
+1237
+1xxx — Aset / Piutang
+Piutang PAS I MI 2018/2019
+LEGACY / REFERENCE
+1238
+1xxx — Aset / Piutang
+Piutang PAS I MTs 2018/2019
+LEGACY / REFERENCE
+1240
+1xxx — Aset / Piutang
+Piutang Batik Siswa 2019
+LEGACY / REFERENCE
+1241
+1xxx — Aset / Piutang
+Piutang PAT kelas 6 2018/2019
+LEGACY / REFERENCE
+1242
+1xxx — Aset / Piutang
+Piutang UM ke Nuan 2018/2019
+LEGACY / REFERENCE
+1243
+1xxx — Aset / Piutang
+Piutang PAT MI 2018/2019
+LEGACY / REFERENCE
+1244
+1xxx — Aset / Piutang
+Piutang PAT MTs 2018/2019
+LEGACY / REFERENCE
+1246
+1xxx — Aset / Piutang
+Piutang MOPDIK 2019
+LEGACY / REFERENCE
+1247
+1xxx — Aset / Piutang
+Piutang PAS I MTs ke Nuan 2019/2020
+LEGACY / REFERENCE
+1248
+1xxx — Aset / Piutang
+Piutang PAS I MI 2019/2020
+LEGACY / REFERENCE
+1249
+1xxx — Aset / Piutang
+Piutang PAS I MTs 2019/2020
+LEGACY / REFERENCE
+1250
+1xxx — Aset / Piutang
+Piutang UM ke Nuan 2019/2020
+LEGACY / REFERENCE
+1251
+1xxx — Aset / Piutang
+Piutang PHT & PAS MTs 2019/2020
+LEGACY / REFERENCE
+1252
+1xxx — Aset / Piutang
+Piutang PAT kls 6 + UM ke Nuan MI 2019/2020
+LEGACY / REFERENCE
+1253
+1xxx — Aset / Piutang
+Piutang PAT kls 1-5 2019/2020
+LEGACY / REFERENCE
+1255
+1xxx — Aset / Piutang
+Piutang PAT MTs 2019/2020
+LEGACY / REFERENCE
+1258
+1xxx — Aset / Piutang
+Piutang Modul I 2020/2021
+LEGACY / REFERENCE
+1261
+1xxx — Aset / Piutang
+Piutang Modul II 2020/2021
+LEGACY / REFERENCE
+1273
+1xxx — Aset / Piutang
+Piutang Modul I 2021/2022
+LEGACY / REFERENCE
+1274
+1xxx — Aset / Piutang
+Piutang PAS MI 2021/2022
+LEGACY / REFERENCE
+1276
+1xxx — Aset / Piutang
+Piutang PAS ke Nuan SMP 2021/2022
+LEGACY / REFERENCE
+1277
+1xxx — Aset / Piutang
+Piutang Modul II 2021/2022
+LEGACY / REFERENCE
+1279
+1xxx — Aset / Piutang
+Piutang PAT & UM ke Nuan MI 2021/2022
+LEGACY / REFERENCE
+1280
+1xxx — Aset / Piutang
+Piutang UM ke Nuan MTs 2021/2022
+LEGACY / REFERENCE
+1282
+1xxx — Aset / Piutang
+Piutang PAT kls 1-5 2021/2022
+LEGACY / REFERENCE
+1283
+1xxx — Aset / Piutang
+Piutang Batik Siswa 2022
+LEGACY / REFERENCE
+1285
+1xxx — Aset / Piutang
+Piutang Modul I 2022/2023
+LEGACY / REFERENCE
+1287
+1xxx — Aset / Piutang
+Piutang PAS MI 2022/2023
+LEGACY / REFERENCE
+1288
+1xxx — Aset / Piutang
+Piutang PHT & PAT MTs 2022/2023
+LEGACY / REFERENCE
+1289
+1xxx — Aset / Piutang
+Piutang Modul II 2022/2023
+LEGACY / REFERENCE
+1290
+1xxx — Aset / Piutang
+Piutang PAT & UM ke Nuan MI 2022/2023
+LEGACY / REFERENCE
+1291
+1xxx — Aset / Piutang
+Piutang UM ke Nuan MTs 2022/2023
+LEGACY / REFERENCE
+1292
+1xxx — Aset / Piutang
+Piutang PAT MTs 2022/2023
+LEGACY / REFERENCE
+1293
+1xxx — Aset / Piutang
+Piutang PAT kls 1-5 2022/2023
+LEGACY / REFERENCE
+1294
+1xxx — Aset / Piutang
+Piutang PHT I MTs 2023/2024
+LEGACY / REFERENCE
+1295
+1xxx — Aset / Piutang
+Piutang Modul I 2023/2024
+LEGACY / REFERENCE
+1296
+1xxx — Aset / Piutang
+Piutang PAS MI 2023/2024
+LEGACY / REFERENCE
+1297
+1xxx — Aset / Piutang
+Piutang PAS MTs 2023/2024
+LEGACY / REFERENCE
+1298
+1xxx — Aset / Piutang
+Piutang PAT & UM ke Nuan MI 2023/2024
+LEGACY / REFERENCE
+1299
+1xxx — Aset / Piutang
+Piutang PHT & PAT MTs 2023/2024
+LEGACY / REFERENCE
+1300
+1xxx — Aset / Piutang
+Piutang Modul II 2023/2024
+LEGACY / REFERENCE
+1301
+1xxx — Aset / Piutang
+Piutang PAT MTs 2023/2024
+LEGACY / REFERENCE
+1302
+1xxx — Aset / Piutang
+Piutang PAT kls 1-5 2023/2024
+LEGACY / REFERENCE
+1303
+1xxx — Aset / Piutang
+Piutang Modul I 2024/2025
+LEGACY / REFERENCE
+1304
+1xxx — Aset / Piutang
+Piutang Buku P5
+LEGACY / REFERENCE
+1305
+1xxx — Aset / Piutang
+Piutang PAS ASAS MI 2024/2025
+ACTIVE MARET 2026
+1306
+1xxx — Aset / Piutang
+Piutang Modul II 2024-2025
+ACTIVE MARET 2026
+1307
+1xxx — Aset / Piutang
+Piutang PAT & UM ke Nuan MI 2024/2025
+ACTIVE MARET 2026
+1308
+1xxx — Aset / Piutang
+Piutang UM ke Nuan MTs 2024/2025
+LEGACY / REFERENCE
+1309
+1xxx — Aset / Piutang
+Piutang PAT kls 1-5 2024/2025
+LEGACY / REFERENCE
+1310
+1xxx — Aset / Piutang
+Piutang Modul I 2025/2026
+ACTIVE MARET 2026
+1311
+1xxx — Aset / Piutang
+Piutang LKS ke NU an MTs 2025/2026
+LEGACY / REFERENCE
+1312
+1xxx — Aset / Piutang
+Piutang Buku PJOK MTs 2025/2026
+ACTIVE MARET 2026
+1313
+1xxx — Aset / Piutang
+Piutang ASAS MI 2025/2026
+ACTIVE MARET 2026
+1314
+1xxx — Aset / Piutang
+Piutang Modul II 2025/2026
+ACTIVE MARET 2026
+1315
+1xxx — Aset / Piutang
+Piutang LKS ke NU an II MTs 2025/2026
+ACTIVE MARET 2026
+1316
+1xxx — Aset / Piutang
+Piutang PAT & UM ke Nuan MI 2025/2026
+ACTIVE MARET 2026
+2111
+2xxx — Kewajiban / Alokasi / Dana
+Hutang BHPNU
+LEGACY / REFERENCE
+2112
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PTS II 2016/2017 MI
+LEGACY / REFERENCE
+2117
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UKK MI 2016/2017
+LEGACY / REFERENCE
+2118
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UKK MTs 2016/2017
+LEGACY / REFERENCE
+2126
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PTS I 2017/2018
+LEGACY / REFERENCE
+2127
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UAS I 2017/2018
+LEGACY / REFERENCE
+2130
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PTS keals 1-5 MI 2017/2018
+LEGACY / REFERENCE
+2131
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT kelas 6 2017/2018
+LEGACY / REFERENCE
+2134
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UKK MI 2017/2018
+LEGACY / REFERENCE
+2135
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UKK MTs 2017/2018
+LEGACY / REFERENCE
+2137
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS I MI 2018/2019
+LEGACY / REFERENCE
+2138
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS I MTs 2018/2019
+LEGACY / REFERENCE
+2139
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT kelas 6 2018/2019
+LEGACY / REFERENCE
+2141
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UM ke Nuan 2018/2019
+LEGACY / REFERENCE
+2142
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MI 2018/2019
+LEGACY / REFERENCE
+2143
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MTs 2018/2019
+LEGACY / REFERENCE
+2147
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS I ke NUan 2019/2020
+LEGACY / REFERENCE
+2148
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS I MI 2019/2020
+LEGACY / REFERENCE
+2149
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS I MTs 2019/2020
+LEGACY / REFERENCE
+2150
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UM ke Nuan 2019/2020
+LEGACY / REFERENCE
+2151
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT & PAS 2019/2020
+LEGACY / REFERENCE
+2152
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT kls 6 + UM ke Nuan MI 2019/2020
+LEGACY / REFERENCE
+2153
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT kls 1-5 2019/2020
+LEGACY / REFERENCE
+2154
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MTs 2019/2020
+LEGACY / REFERENCE
+2156
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul I 2020/2021
+LEGACY / REFERENCE
+2157
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi SK 2020
+LEGACY / REFERENCE
+2158
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MI 2020/2021
+LEGACY / REFERENCE
+2159
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MTs 2020/2021
+LEGACY / REFERENCE
+2160
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul II 2020/2021
+LEGACY / REFERENCE
+2161
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT & PAT ke Nuan SMP 2020/2021
+LEGACY / REFERENCE
+2162
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT & PAT MTs 2020/2021
+LEGACY / REFERENCE
+2163
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT & UM ke Nuan MI 2020/2021
+LEGACY / REFERENCE
+2164
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UM ke Nuan MTs & SMK 2020/2021
+LEGACY / REFERENCE
+2165
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UASBN ke Nuan SMP 2020/2021
+LEGACY / REFERENCE
+2166
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MTs 2020/2021
+LEGACY / REFERENCE
+2167
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MI kls 1-5 2020/2021
+LEGACY / REFERENCE
+2168
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT keNUan SMP 2020/2021
+LEGACY / REFERENCE
+2169
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PTS I MTs 2021/2022
+LEGACY / REFERENCE
+2170
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul I 2021/2022
+LEGACY / REFERENCE
+2171
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MI 2021/2022
+LEGACY / REFERENCE
+2172
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MTs 2021/2022
+LEGACY / REFERENCE
+2173
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS ke Nuan SMP 2021/2022
+LEGACY / REFERENCE
+2174
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul II 2021/2022
+LEGACY / REFERENCE
+2175
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT & PAT MTs 2021/2022
+LEGACY / REFERENCE
+2176
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT & UM ke Nuan MI 2021/2022
+LEGACY / REFERENCE
+2177
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UM ke Nuan MTs 2021/2022
+LEGACY / REFERENCE
+2178
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi SK 2021
+LEGACY / REFERENCE
+2179
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MTs 2021/2022
+LEGACY / REFERENCE
+2180
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MI kls 1-5 2021/2022
+LEGACY / REFERENCE
+2181
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT I MTs 2022/2023
+LEGACY / REFERENCE
+2182
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul I 2022/2023
+LEGACY / REFERENCE
+2183
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MTs 2022/2023
+LEGACY / REFERENCE
+2184
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MI 2022/2023
+LEGACY / REFERENCE
+2185
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT & PAT MTs 2022/2023
+LEGACY / REFERENCE
+2186
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul II 2022/2023
+LEGACY / REFERENCE
+2187
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi SK 2023
+LEGACY / REFERENCE
+2188
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT & UM ke Nuan MI 2022/2023
+LEGACY / REFERENCE
+2189
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UM ke Nuan MTs 2022/2023
+LEGACY / REFERENCE
+2190
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MTs 2022/2023
+LEGACY / REFERENCE
+2191
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MI kls 1-5 2022/2023
+LEGACY / REFERENCE
+2192
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT I MTs 2023/2024
+LEGACY / REFERENCE
+2193
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi SK 2024
+LEGACY / REFERENCE
+2194
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul I 2023/2024
+LEGACY / REFERENCE
+2195
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MI 2023/2024
+LEGACY / REFERENCE
+2196
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS MTs 2023/2024
+LEGACY / REFERENCE
+2197
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT & UM ke Nuan MI 2023/2024
+LEGACY / REFERENCE
+2198
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PHT & PAT MTs 2023/2024
+LEGACY / REFERENCE
+2199
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul II 2023/2024
+LEGACY / REFERENCE
+2200
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MTs 2023/2024
+LEGACY / REFERENCE
+2201
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MI kls 1-5 2023/2024
+LEGACY / REFERENCE
+2202
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul I 2024/2025
+LEGACY / REFERENCE
+2203
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Buku P5
+LEGACY / REFERENCE
+2204
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAS ASAS MI 2024/2025
+ACTIVE MARET 2026
+2205
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PTS MTs 2024/2025
+LEGACY / REFERENCE
+2206
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul II 2024/2025
+ACTIVE MARET 2026
+2207
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Buku Ramadhan 1447 H
+LEGACY / REFERENCE
+2208
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT & UM ke Nuan MI 2023/2024
+ACTIVE MARET 2026
+2209
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi UM ke NU an MTs 2024/2025
+LEGACY / REFERENCE
+2210
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi PAT MI 2024/2025
+ACTIVE MARET 2026
+2211
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Modul I 2025/2026
+ACTIVE MARET 2026
+2212
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Ops ASAS MI 2025/2026
+LEGACY / REFERENCE
+2213
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Ops Buku PJOK MTs 2025/2026
+LEGACY / REFERENCE
+2214
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Ops ASAS MI 2025/2025
+ACTIVE MARET 2026
+2215
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Ops SK 2025
+ACTIVE MARET 2026
+2216
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Ops Modul II 2025/2026
+ACTIVE MARET 2026
+2217
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Ops LKS Ke NU an II MTs 2025/2026
+LEGACY / REFERENCE
+2218
+2xxx — Kewajiban / Alokasi / Dana
+Alokasi Ops PAT & UM ke Nuan MI 2025/2026
+ACTIVE MARET 2026
+2500
+2xxx — Kewajiban / Alokasi / Dana
+Biaya Administrasi & Umum
+LEGACY — REVIEW
+3000
+3xxx — Modal / Pembelian / Persediaan
+Modal
+LEGACY / REFERENCE
+3110
+3xxx — Modal / Pembelian / Persediaan
+Pembelian Batik Siswa
+LEGACY / REFERENCE
+3120
+3xxx — Modal / Pembelian / Persediaan
+Pembelian Batik Guru
+LEGACY / REFERENCE
+3200
+3xxx — Modal / Pembelian / Persediaan
+Pembelian Buku ke Nuan
+LEGACY / REFERENCE
+3300
+3xxx — Modal / Pembelian / Persediaan
+Pembelian MOPDIK
+LEGACY / REFERENCE
+3301
+3xxx — Modal / Pembelian / Persediaan
+Pembelian Buku FIQH Tradisional
+LEGACY / REFERENCE
+4101
+4xxx — Pendapatan
+Pend. Legalisir SK
+LEGACY / REFERENCE
+4102
+4xxx — Pendapatan
+Pend. Revisi SK
+LEGACY / REFERENCE
+4103
+4xxx — Pendapatan
+Pend. Pembuatan SK Guru
+ACTIVE MARET 2026
+4104
+4xxx — Pendapatan
+Pend. Batik Siswa
+ACTIVE MARET 2026
+4105
+4xxx — Pendapatan
+Pend. Batik Guru
+ACTIVE MARET 2026
+4107
+4xxx — Pendapatan
+Pend. Buku NU
+ACTIVE MARET 2026
+4109
+4xxx — Pendapatan
+Pend. Modul
+LEGACY / REFERENCE
+4110
+4xxx — Pendapatan
+Pend. MOPDIK 2025
+LEGACY / REFERENCE
+4111
+4xxx — Pendapatan
+Pend. Buku B. Jawa
+LEGACY / REFERENCE
+4116
+4xxx — Pendapatan
+Pend. Lain-lain
+ACTIVE MARET 2026
+4117
+4xxx — Pendapatan
+Pend. Iuran RAKERDIN
+LEGACY / REFERENCE
+4119
+4xxx — Pendapatan
+Pend. Pembuatan SK Kamad
+ACTIVE MARET 2026
+4121
+4xxx — Pendapatan
+Buku Sako Ma'arif
+LEGACY / REFERENCE
+4122
+4xxx — Pendapatan
+Pend. Banner HSN 2023
+LEGACY / REFERENCE
+4123
+4xxx — Pendapatan
+Iuran SAKOMA Ma'arif
+LEGACY / REFERENCE
+4124
+4xxx — Pendapatan
+Iuran Siswa 2025
+LEGACY / REFERENCE
+4125
+4xxx — Pendapatan
+Pend. Buku FIQH Tradisional
+LEGACY / REFERENCE
+4126
+4xxx — Pendapatan
+SAKOMA
+LEGACY / REFERENCE
+4127
+4xxx — Pendapatan
+Pendapatan Kontribusi Mts
+LEGACY / REFERENCE
+4128
+4xxx — Pendapatan
+Alokasi Kontribusi Naskah MTs
+LEGACY / REFERENCE
+4129
+4xxx — Pendapatan
+Biaya Kontribusi Ke PCNU
+LEGACY / REFERENCE
+4130
+4xxx — Pendapatan
+Iuran PORSEMA MA
+LEGACY / REFERENCE
+4131
+4xxx — Pendapatan
+PORSEMA MI
+LEGACY / REFERENCE
+4132
+4xxx — Pendapatan
+PORSEMA MTs
+LEGACY / REFERENCE
+4133
+4xxx — Pendapatan
+PORSEMA MA
+LEGACY / REFERENCE
+4134
+4xxx — Pendapatan
+Biaya PORSEMA WILAYAH
+LEGACY / REFERENCE
+4135
+4xxx — Pendapatan
+Iuran Siswa 2025/2026
+ACTIVE MARET 2026
+4136
+4xxx — Pendapatan
+Alokasi Ops SK Kamad
+ACTIVE MARET 2026
+5000
+5xxx — Beban / Operasional / Mutasi
+Buku Ramadhan 1447 H
+LEGACY MIXED — WAJIB NORMALISASI
+5001
+5xxx — Beban / Operasional / Mutasi
+Mutasi Rekening
+LEGACY / REFERENCE
+5002
+5xxx — Beban / Operasional / Mutasi
+Parcel 2026
+ACTIVE MARET 2026
+5102
+5xxx — Beban / Operasional / Mutasi
+Biaya BPJS Ketenagakerjaan
+ACTIVE MARET 2026
+5105
+5xxx — Beban / Operasional / Mutasi
+Biaya Gaji Karyawan
+ACTIVE MARET 2026
+5107
+5xxx — Beban / Operasional / Mutasi
+Biaya Listrik, air, Telp.
+ACTIVE MARET 2026
+5108
+5xxx — Beban / Operasional / Mutasi
+Biaya Koran & Majalah
+ACTIVE MARET 2026
+5109
+5xxx — Beban / Operasional / Mutasi
+Biaya ATK
+LEGACY / REFERENCE
+5110
+5xxx — Beban / Operasional / Mutasi
+Biaya Kerumahtanggan
+ACTIVE MARET 2026
+5111
+5xxx — Beban / Operasional / Mutasi
+Biaya Konsumsi
+ACTIVE MARET 2026
+5112
+5xxx — Beban / Operasional / Mutasi
+Biaya Transport
+ACTIVE MARET 2026
+5114
+5xxx — Beban / Operasional / Mutasi
+Biaya Sosial
+ACTIVE MARET 2026
+5115
+5xxx — Beban / Operasional / Mutasi
+Biaya Reparasi
+LEGACY / REFERENCE
+5116
+5xxx — Beban / Operasional / Mutasi
+Biaya Administrasi & Umum
+ACTIVE MARET 2026
+5117
+5xxx — Beban / Operasional / Mutasi
+Biaya Operasional Kendaraan
+ACTIVE MARET 2026
+5130
+5xxx — Beban / Operasional / Mutasi
+Rapat Koperasi KOMANU
+LEGACY / REFERENCE
+5157
+5xxx — Beban / Operasional / Mutasi
+Biaya Operasional Rapat-Rapat
+ACTIVE MARET 2026
+5158
+5xxx — Beban / Operasional / Mutasi
+Pelantikan Kepala Madrasah
+LEGACY / REFERENCE
+5167
+5xxx — Beban / Operasional / Mutasi
+Biaya Perjalanan Dinas
+LEGACY / REFERENCE
+5170
+5xxx — Beban / Operasional / Mutasi
+Bintek Aswaja & Branding Madrasah
+LEGACY / REFERENCE
+5171
+5xxx — Beban / Operasional / Mutasi
+THR Idul Fitri 1446 H
+ACTIVE MARET 2026
+5172
+5xxx — Beban / Operasional / Mutasi
+Biaya Kontribusi Ke PCNU
+LEGACY / REFERENCE
+5173
+5xxx — Beban / Operasional / Mutasi
+Raker MWC LP Ma'arif NU
+LEGACY / REFERENCE
+5174
+5xxx — Beban / Operasional / Mutasi
+Fit & Propertest
+LEGACY / REFERENCE
+3. Model Database / ERD
+Model harus memisahkan transaksi sumber, posting jurnal, bank movement, receivable, fund allocation, dan reporting dimension. Bank transaction tidak boleh menjadi journal line secara 1:1 tanpa proses classification.
+3.1. Entitas inti
+Entity
+Fungsi
+Kolom inti
+organizations
+tenant/organisasi
+id, code, name, timezone, active
+users
+pengguna
+id, organization_id, name, email, role_id, active
+accounts
+COA
+id, organization_id, code, name, account_type, normal_balance, legacy_code, active
+fiscal_periods
+periode
+id, organization_id, year, month, status, closed_at
+counterparties
+pihak transaksi
+id, organization_id, name, type, external_code, active
+bank_accounts
+rekening bank
+id, organization_id, bank_name, account_no_masked, account_name, coa_account_id, opening_balance
+bank_transactions
+raw/normalized bank movement
+id, bank_account_id, statement_date, external_ref, raw_description, debit_amount, credit_amount, direction, counterparty_id, role, classification_status, reconciliation_status
+transactions
+business transaction
+id, transaction_no, date, type, direction, counterparty_id, amount, description, source
+journal_entries
+header jurnal
+id, fiscal_period_id, transaction_id, journal_no, date, memo, status, posted_at
+journal_lines
+detail jurnal
+id, journal_entry_id, account_id, debit, credit, counterparty_id, receivable_id, fund_id
+receivables
+piutang
+id, counterparty_id, account_id, invoice_no, category_id, due_date, original_amount, outstanding_amount, status
+receivable_allocations
+alokasi pembayaran piutang
+id, receivable_id, transaction_id, allocated_amount, allocation_date
+funds
+bucket dana/alokasi
+id, code, name, fiscal_year, source_account_id, liability_account_id, status
+fund_allocations
+alokasi dana
+id, fund_id, date, amount, beneficiary/counterparty_id, purpose, status
+fund_realizations
+realisasi dana
+id, fund_allocation_id, transaction_id, amount, date
+transaction_categories
+master jenis transaksi
+id, code, name, direction, default_debit_account_id, default_credit_account_id
+reconciliations
+rekonsiliasi bank
+id, bank_account_id, period_id, statement_balance, ledger_balance, difference, status
+reconciliation_items
+item rekonsiliasi
+id, reconciliation_id, bank_transaction_id, journal_entry_id, match_status, note
+audit_logs
+audit trail
+id, user_id, entity, entity_id, action, before_json, after_json, created_at
+3.2. ERD logis
+organizations ├── users ├── accounts ├── fiscal_periods ├── counterparties ├── bank_accounts │    └── bank_transactions │          ├── counterparty │          ├── transaction │          └── reconciliation_item ├── transaction_categories ├── transactions │    └── journal_entries │          └── journal_lines │                ├── accounts │                ├── receivables │                └── funds ├── receivables │    └── receivable_allocations ├── funds │    ├── fund_allocations │    └── fund_realizations └── reconciliations
+3.3. Invariants database
+Journal entry posted wajib memiliki total debit = total credit.
+Nominal debit dan credit pada satu journal line tidak boleh sama-sama > 0.
+Bank transaction IN wajib memiliki credit_amount > 0 atau normalized_amount > 0; OUT wajib debit_amount > 0.
+TRANSFER wajib mempunyai exactly two bank legs: source OUT dan destination IN.
+Posted transaction tidak boleh diedit langsung; koreksi menggunakan reversal + replacement.
+Receivable outstanding tidak boleh negatif kecuali overpayment diaktifkan secara eksplisit.
+Reconciliation yang CLOSED tidak dapat diubah tanpa reopening dengan permission khusus.
+Fiscal period CLOSED menolak posting baru.
+4. Business Rules Setiap Jenis Transaksi
+Type
+Deteksi dari workbook
+Rule
+Default journal
+BANK_CREDIT / UANG MASUK
+Kredit pada bank statement
+direction=IN; counterparty_role=PAYER/DEPOSITOR atau BANK sebagai sumber
+Dr bank; Cr akun lawan
+BANK_DEBIT / UANG KELUAR
+Debet pada bank statement
+direction=OUT; counterparty_role=PAYEE/RECIPIENT atau BANK
+Dr akun lawan; Cr bank
+RECEIVABLE_PAYMENT
+Uang masuk untuk piutang
+IN + receivable match
+Dr bank; Cr receivable
+DIRECT_INCOME
+Uang masuk tanpa piutang
+IN + income category
+Dr bank; Cr revenue
+BANK_INTEREST
+Bunga rekening
+IN + counterparty=BANK
+Dr bank; Cr interest/other income
+BANK_FEE_TAX
+Admin/pajak bank
+OUT + counterparty=BANK
+Dr bank expense; Cr bank
+ALLOCATION_DISBURSEMENT
+Dana alokasi dibayarkan
+OUT + fund/allocation selected
+Dr allocation/fund liability; Cr bank, mengikuti mapping akun
+OPERATING_EXPENSE
+Beban operasional
+OUT + expense category
+Dr expense; Cr bank/cash
+CASH_TRANSACTION
+Transaksi kas fisik
+IN/OUT pada cash account
+Dr/Cr cash sesuai arah; lawan mengikuti tipe
+BANK_TRANSFER
+Pemindahan antar rekening internal
+TRANSFER
+Dr destination bank; Cr source bank
+OPENING_BALANCE
+Saldo awal periode
+source=OPENING
+Opening journal; tidak dianggap pendapatan
+ADJUSTMENT
+Koreksi akuntansi
+manual + approval
+Journal reversal/adjustment
+4.1. Contoh MI Darwata Sindangbarang
+INPUT BANK STATEMENTTanggal       02/03/2026Pihak         MI Darwata SindangbarangUraian        Pend. Buku Ramadhan 1447 HBank Side     KREDITNominal       852.000NORMALIZEDdirection     INrole          PAYERamount        852.000POSTINGDr  BRI Tabungan                         852.000    Cr  Pendapatan Buku Ramadhan         852.000CATATAN:Jika pada saat transaksi terdapat invoice/receivable yang cocok,posting berubah menjadi Dr Bank / Cr Receivable.Bank-side CREDIT tidak boleh dipetakan menjadi journal CREDIT.
+4.2. Contoh Pajak Bulanan / Adm Bank
+BANK STATEMENTPajak Bulanan (Bank)DEBET Rp53.193NORMALIZEDdirection     OUTrole          PAYEE = BANKamount        53.193JOURNALDr  Biaya Administrasi & Umum          53.193    Cr  BRI Tabungan                   53.193
+5. Workflow Jurnal Otomatis
+Import/entry transaksi.
+Normalisasi nominal menjadi amount + direction berdasarkan bank side.
+Resolve counterparty melalui master, alias, fuzzy matching, atau input manual.
+Classify transaction type dari kode akun, uraian, aturan kategori, dan context; AI hanya memberi rekomendasi, bukan posting final.
+Jika tipe RECEIVABLE_PAYMENT, cari receivable berdasarkan counterparty + product/category + period + nominal.
+Jika tipe FUND_ALLOCATION, resolve fund/allocation bucket dan default journal mapping.
+Generate journal draft.
+Run validation: balanced, period open, account active, receivable not overpaid, bank balance valid.
+User approve/post.
+Update ledger, receivable, fund balance, reconciliation state, and audit trail atomically.
+5.1. Journal posting matrix
+Kondisi
+Debit
+Credit
+Posting
+IN + receivable
+Bank
+Receivable
+Dr Bank / Cr AR
+IN + direct income
+Bank
+Revenue
+Dr Bank / Cr Revenue
+IN + interest
+Bank
+Interest/Other Income
+Dr Bank / Cr Income
+OUT + expense
+Expense
+Bank
+Dr Expense / Cr Bank
+OUT + bank fee/tax
+Bank Expense
+Bank
+Dr Bank Expense / Cr Bank
+OUT + allocation
+Fund/Allocation
+Bank
+Dr Allocation/Fund / Cr Bank
+TRANSFER IN leg
+Destination Bank
+Source Bank
+Dr Destination / Cr Source
+CASH IN
+Cash
+Income/AR
+Dr Cash / Cr Income/AR
+CASH OUT
+Expense/Allocation
+Cash
+Dr Expense/Allocation / Cr Cash
+6. Workflow Piutang & Pembayaran
+RECEIVABLE CREATIONInvoice/Tagihan  -> counterparty  -> category/product  -> academic year  -> original amount  -> due date  -> outstandingPAYMENTBank/Cash IN  -> identify payer  -> match receivable  -> allocate payment  -> reduce outstanding  -> journal Dr Bank/Cash / Cr AR  -> reconciliation linkOVERPAYMENTIf payment > outstanding:  -> block OR create customer credit balance (policy configurable)
+6.1. Matching priority
+Exact reference/invoice ID jika tersedia.
+Counterparty exact match + nominal exact.
+Counterparty normalized alias + category/product + nominal.
+Counterparty + category + partial nominal.
+Fuzzy match only as suggestion; wajib approval manusia.
+6.2. Counterparty role rules
+Bank statement
+Direction
+Role
+Makna
+Kredit
+IN
+PAYER / DEPOSITOR
+Pihak yang menyetor/membayar ke LP Ma’arif
+Kredit
+IN
+BANK
+Bank sebagai sumber bunga/credit interest
+Debet
+OUT
+PAYEE / RECIPIENT
+Pihak yang menerima dana
+Debet
+OUT
+BANK
+Bank sebagai penerima biaya/pajak
+Transfer
+TRANSFER
+INTERNAL
+Rekening internal LP Ma’arif
+7. Workflow Alokasi Dana
+Workbook menunjukkan banyak akun 22xx seperti Alokasi Ops Modul, ASAS, SK, PAT/UM, dan kegiatan sejenis. Aplikasi harus memodelkannya sebagai fund/allocation bucket agar saldo dana dan realisasi dapat dilacak tanpa mengandalkan nama akun semata.
+Create/identify fund: code, name, academic year, source program, designated purpose.
+Receive source funds or recognize allocation balance according to approved accounting mapping.
+Create allocation commitment if needed.
+Disbursement records counterparty, purpose, amount, bank/cash source.
+Post journal according to the fund's debit/credit mapping.
+Track allocated, realized, returned, and remaining balance.
+Expose fund balance in RINCIAN KAS RIIL-style report.
+FUND  allocated_amount       - realized_amount       + returned_amount       = available_amountGuard:realized_amount <= allocated_amountunless policy allows deficit/advance.
+7.1. Contoh Alokasi Ops Modul II 2025/2026
+Bank statement:FK2MI BantarsariUraian: Alokasi Ops Modul II 2025/2026DEBET Rp6.069.000Normalized:direction = OUTcounterparty_role = PAYEEfund = Alokasi Ops Modul II 2025/2026Default journal:Dr  Fund/Allocation 2216          6.069.000    Cr  BRI Giro 304              6.069.000Mapping final harus dikonfirmasi oleh owner accounting sebelum production.
+8. Workflow Bank Reconciliation
+Create reconciliation for bank account + fiscal period.
+Import statement and compute opening/closing balance from statement.
+Compare statement movements to posted ledger bank movements.
+Auto-match exact amount/date/reference where possible.
+Classify unmatched bank credits/debits.
+Generate journal draft for valid unmatched items.
+Approve and post.
+Re-run reconciliation.
+Close period only when difference = 0 or an explicitly approved reconciling item remains.
+8.1. Formula kontrol
+Statement ending balance= Statement opening balance  - total bank debits  + total bank creditsLedger ending bank balance= Ledger opening bank balance  + posted bank debits-to-asset  - posted bank credits-to-assetReconciliation difference= Statement ending balance - Ledger ending balance
+8.2. Baseline Maret 2026 dari workbook
+Rekening
+Saldo Awal
+Debet
+Kredit
+Saldo Akhir
+BRI Giro 308
+Rp72,125,396.20
+Rp5,539.00
+Rp9,077,695.00
+Rp81,197,552.20
+BRI Giro 304
+Rp469,776,285.00
+Rp124,258,949.00
+Rp101,846,004.00
+Rp447,363,340.00
+BRI Tabungan 538
+Rp571,955,656.80
+Rp61,193.00
+Rp109,362,464.00
+Rp681,256,927.80
+Angka ini menjadi baseline golden test. Sistem baru harus dapat menghasilkan saldo akhir yang sama setelah migration/posting dan reconciliation.
+9. Rancangan Semua Laporan agar Sama dengan Excel
+Report
+Source engine
+Output
+Neraca Awal
+Opening balance per 31/awal periode
+Saldo awal aset, piutang, alokasi/kewajiban, modal
+Buku Bank per Rekening
+Bank statement
+Tanggal, counterparty, uraian, bank-side debit/credit, saldo berjalan, journal link
+Jurnal Umum
+General ledger
+Tanggal, nomor jurnal, keterangan, kode akun, debit, kredit
+Buku Besar
+Per account
+Opening, debit, credit, ending balance
+Trial Balance
+Per period
+Total debit/credit dan saldo per akun
+Piutang
+Per counterparty/category
+Original, payment, outstanding, aging
+Daftar Pembayaran
+Payment history
+Counterparty, bank, invoice/receivable, amount, match status
+Alokasi Dana
+Per fund
+Allocated, realized, returned, available
+Rekonsiliasi Bank
+Per rekening/periode
+Statement vs ledger, matched/unmatched, difference
+Neraca Akhir Bulan
+As Excel
+Aset vs pasiva/dana sesuai mapping final
+Laporan Arus Kas
+As Excel
+Cash in/out per kategori dan saldo akhir
+Rincian Kas Riil
+As Excel
+Posisi per kegiatan/barang × rekening + total
+9.1. RINCIAN KAS RIIL — desain baru
+Jangan membuat laporan ini dari formula spreadsheet yang mengakses sel bank secara langsung. Laporan harus dibentuk dari ledger + fund/allocation dimensions.
+Dimension:fund/program/itemx bank_accountx cash_accountMEASURE:ending_balanceallocatedrealizedavailableExample output:Batik Siswa | Giro 308 | 0Batik Siswa | Tabungan | ...Buku NU     | Tabungan | ......TOTAL = SUM(all sources)
+10. Mapping Excel Lama → Database Baru
+Excel
+Interpretasi
+Database
+NERACA AWAL BULAN
+Opening balances
+accounts + opening journal + receivable opening
+Bank sheet row
+bank movement
+bank_transactions
+Pengirim/Penerima
+counterparty text
+counterparties + aliases
+Debet
+bank-side debit
+bank_transactions.debit_amount; direction=OUT
+Kredit
+bank-side credit
+bank_transactions.credit_amount; direction=IN
+Saldo
+running bank balance
+derived/cached bank balance
+Kode
+legacy account code
+accounts.legacy_code / account_id
+Uraian Transaksi
+transaction description
+transaction_categories + transaction.description
+JURNAL UMUM D/K
+journal lines
+journal_entries + journal_lines
+Piutang 13xx
+receivable account/category
+receivables
+Alokasi 21xx/22xx
+fund/allocation
+funds + fund_allocations
+RINCIAN KAS RIIL
+position by activity/source
+fund/allocation report
+RINCIAN MAKMUR
+excluded
+NO MIGRATION
+10.1. Aturan migrasi counterparty
+Normalisasi nama: trim, multiple spaces, punctuation, alias.
+MI/MTs/FK2MI tetap disimpan sebagai satu counterparty entity per lembaga.
+Nama bank seperti 'Bunga Rekening (Bank)', 'Pajak Bulanan (Bank)', 'Adm Bank' diarahkan ke system counterparty BANK, bukan lembaga baru.
+Nama yang hilang, seperti Pend. Batik Siswa pada salah satu transaksi, boleh memiliki counterparty_id NULL pada raw import; sistem tidak boleh menebak.
+Alias table diperlukan agar 'MI Al Ma'arif Ciklapa', variasi apostrof/spasi, dan bentuk singkat dapat dipetakan ke entitas yang sama.
+11. Feature Roadmap: MVP → Advanced
+MVP
+Advanced
+Authentication, role & organization
+AI-assisted transaction classification
+Fiscal period
+AI-assisted counterparty resolution
+Master COA + legacy code
+AI-assisted receivable matching
+Counterparty master + alias
+Rule builder tanpa coding
+Bank account master (Giro 304, Giro 308, Tabungan 538)
+Bulk import & re-import with idempotency
+Bank statement import Excel/CSV
+Attachment/evidence per transaction
+Direction normalization IN/OUT/TRANSFER
+Approval matrix
+Manual transaction entry
+Multi-period comparative reporting
+Automatic journal draft
+Budget vs realization
+General ledger + journal
+Fund restriction and commitment
+Receivable master + payment allocation
+Advanced cash-flow classification
+Basic fund/allocation
+Closing/reopening workflow
+Bank reconciliation
+Anomaly detection
+Opening balance
+Scheduled reports
+Neraca, arus kas, buku bank, piutang, allocation report
+API/webhook
+Audit log and posting approval
+Multi-branch/multi-unit jika dibutuhkan
+
+
+MVP harus selesai sampai menghasilkan laporan Maret 2026 yang dapat dibandingkan dengan workbook. Fitur AI tidak boleh menjadi blocker untuk akurasi accounting core.
+12. Prompt Agentic AI per Fase
+Prompt berikut dirancang agar coding agent tidak langsung 'membuat UI', tetapi bekerja berdasarkan spesifikasi, invariant, dan golden dataset.
+PHASE 0 — DISCOVERY & FREEZE
+You are the Accounting System Architect and Reverse-Engineering Lead.Read the provided workbook and this Revision 2 specification.Do not code yet.Produce:1) normalized sheet inventory,2) business-domain model,3) transaction taxonomy,4) COA migration map,5) counterparty alias strategy,6) bank-side debit/credit semantics,7) unresolved accounting questions.Explicitly exclude RINCIAN MAKMUR.Any ambiguous mapping must be flagged, not guessed.
+PHASE 1 — DATABASE
+Implement the database schema from Revision 2.Create migrations, foreign keys, indexes, unique constraints, enums, and audit fields.Enforce:- posted journal must balance,- closed period cannot post,- receivable cannot over-allocate,- transfer has two bank legs,- immutable posted transactions.Seed only approved master data; preserve legacy codes.
+PHASE 2 — ACCOUNTING ENGINE
+Implement a deterministic journal posting engine.Input = normalized transaction + transaction type + account mapping.Output = balanced journal entry.Implement IN, OUT, TRANSFER, receivable payment, income, bank interest, bank fee/tax, allocation, cash transaction, opening balance.Never infer accounting semantics from the word Debet/Kredit alone.
+PHASE 3 — BANK IMPORT
+Implement Excel/CSV bank statement import.Map columns:Tanggal Transaksi, Pengirim/Penerima, Uraian Transaksi, Kode, Debet, Kredit, Saldo.Normalize:Kredit => direction IN.Debet => direction OUT.Do not reverse journal semantics.Store raw row and normalized row.Make import idempotent and auditable.
+PHASE 4 — COUNTERPARTY & MATCHING
+Implement counterparty normalization and matching.Create aliases.System counterparties:BANK, INTERNAL TRANSFER.Use exact matching first, then deterministic aliases, then fuzzy suggestion.Never auto-post a fuzzy match without approval.
+PHASE 5 — RECEIVABLE
+Implement receivable creation, outstanding calculation, payment allocation, overpayment handling, and aging.When bank transaction is IN and classified as receivable payment:Dr Bank / Cr Receivable.Expose matched/unmatched status and allocation history.
+PHASE 6 — FUND / ALLOCATION
+Implement funds and allocation buckets for 21xx/22xx legacy allocation accounts.Track allocated, realized, returned, available.Use configurable account mappings.Do not hard-code that every 22xx is expense or revenue.Require approved mapping for production posting.
+PHASE 7 — RECONCILIATION
+Implement bank reconciliation for Giro 304, Giro 308, Tabungan 538.Calculate statement opening, debits, credits, ending.Match bank transactions to ledger.Show unmatched items.Require zero difference or approved reconciling items before close.
+PHASE 8 — REPORTING
+Implement reports to reproduce workbook outputs:Neraca Awal, Buku Bank, Jurnal Umum, Buku Besar, Trial Balance, Piutang, Alokasi Dana, Rekonsiliasi, Neraca Akhir, Arus Kas, Rincian Kas Riil.Do not build reports from hard-coded Excel positions. Build from database/ledger and mapping configuration.
+PHASE 9 — GOLDEN TEST & RELEASE
+Load March 2026 golden dataset.Compare:- bank opening/ending balances for 3 accounts,- total bank debits/credits,- journal totals,- receivable movements,- allocation balances,- cash flow totals,- balance sheet totals.Generate a discrepancy report.Do not declare release-ready while unexplained differences remain.
+13. Acceptance Criteria Teknis
+MI Darwata Sindangbarang + Kredit Rp852.000 pada Tabungan 538 dinormalisasi sebagai IN + PAYER/DEPOSITOR.
+Piutang Modul II + Kredit bank dinormalisasi sebagai RECEIVABLE_PAYMENT dan mengurangi outstanding.
+Pajak/Adm Bank + Debet bank dinormalisasi sebagai OUT + PAYEE=BANK.
+Transfer antar rekening tidak menambah pendapatan dan tidak mengubah laba.
+Semua posted journals balance exactly.
+Saldo akhir Giro 308, Giro 304, dan Tabungan 538 dapat direkonstruksi dari opening + movements.
+RINCIAN MAKMUR tidak muncul sebagai menu, tabel, import mapping, atau report dependency.
+Legacy COA dapat ditelusuri ke canonical account.
+Setiap transaction memiliki audit trail.
+Excel import dapat diulang tanpa menggandakan transaksi.
+Periode dapat ditutup dan posting setelah close ditolak.
+Golden test Maret 2026 menghasilkan discrepancy report = 0 untuk item yang sudah disepakati.
+14. Hal yang Harus Dikunci Sebelum Production
+Definisi final akun 21xx/22xx: apakah seluruhnya kewajiban dana terikat, alokasi, atau kombinasi legacy.
+Mapping canonical untuk akun 5000 karena workbook menunjukkan penggunaan campuran.
+Apakah setiap pendapatan langsung selalu merupakan revenue atau sebagian sebenarnya pelunasan receivable.
+Kebijakan overpayment piutang.
+Apakah RINCIAN KAS RIIL merupakan dana terikat secara akuntansi atau hanya laporan manajerial.
+Kebijakan closing periode dan jurnal koreksi.
+Apakah kas fisik 1101 dan BMT 1102 harus menjadi bank/cash account aktif pada MVP atau hanya saldo historis.
+Lampiran A — Contoh Normalisasi Transaksi Maret 2026
+Tanggal
+Counterparty
+Uraian
+Legacy Code
+Bank Debet
+Bank Kredit
+Direction
+Role
+Type
+02/03/2026
+MI Darwata Sindangbarang
+Pend. Buku Ramadhan 1447 H
+5000
+—
+852.000
+IN
+PAYER
+DIRECT_INCOME / review
+03/03/2026
+MI Al Hasan Pasirgaru
+Piutang Modul II 2025/2026
+1314
+—
+222.000
+IN
+PAYER
+RECEIVABLE_PAYMENT
+09/03/2026
+MTs Al Mukaromah Sampang
+Piutang Buku PJOK MTs 2025/2026
+1312
+—
+4.000.000
+IN
+PAYER
+RECEIVABLE_PAYMENT
+15/03/2026
+Pajak Bulanan (Bank)
+Biaya Administrasi & Umum
+5116
+53.193
+—
+OUT
+PAYEE=BANK
+BANK_FEE_TAX
+15/03/2026
+Adm Bank
+Biaya Administrasi & Umum
+5116
+6.000
+—
+OUT
+PAYEE=BANK
+BANK_FEE_TAX
+15/03/2026
+Bunga Rekening (Bank)
+Pend. Lain-lain
+4116
+—
+275.964
+IN
+PAYER=BANK
+BANK_INTEREST
+17/03/2026
+MI Al Ma'arif Kedungreja
+Piutang Modul II 2025/2026
+1314
+—
+6.467.000
+IN
+PAYER
+RECEIVABLE_PAYMENT
+17/03/2026
+MI Ma'arif Karangsembung 03
+Pend. Lain-lain
+4116
+—
+77.500
+IN
+PAYER
+DIRECT_INCOME
+Lampiran B — Prinsip Final Rev. 2
+RULE 01  : Bank CREDIT = money IN, not journal credit.RULE 02  : Bank DEBIT  = money OUT, not journal debit.RULE 03  : Counterparty role follows direction.RULE 04  : PAYER/DEPOSITOR is used for external money-in.RULE 05  : PAYEE/RECIPIENT is used for external money-out.RULE 06  : BANK is a system counterparty for interest/fees/tax.RULE 07  : TRANSFER is internal and never revenue/expense by itself.RULE 08  : Receivable payment must reduce an actual receivable.RULE 09  : Allocation must be tracked separately from generic expense.RULE 10  : Posted journal is immutable; correction = reversal.RULE 11  : RINCIAN MAKMUR is out of scope.RULE 12  : March 2026 is the golden regression dataset.
+
+REVISION 3 — PRODUCTION-READY AMENDMENT
+Supersedes conflicting rules in Rev. 2Basis: audit/research summary + workbook Maret 2026
+REV3-00. Status dan Aturan Supersession
+Bagian ini adalah revisi normatif terhadap Rev. 2. Jika ada perbedaan antara isi Rev. 2 dan bagian Rev. 3 ini, maka Rev. 3 yang berlaku. Struktur scope tetap sama, termasuk keputusan bahwa RINCIAN MAKMUR tidak masuk aplikasi.
+Bank statement dan accounting journal adalah dua semantic layer berbeda.
+Kredit bank = uang masuk (IN); Debet bank = uang keluar (OUT).
+Counterparty role mengikuti direction dan konteks transaksi.
+Unapplied cash tidak otomatis menjadi pendapatan.
+Posted journal immutable; koreksi menggunakan reversal/adjustment.
+Period closing adalah kontrol sistem, bukan sekadar laporan.
+Import Excel harus idempotent.
+Maret 2026 adalah golden regression dataset.
+RINCIAN MAKMUR tetap EXCLUDED.
+REV3-01. Executive Architecture
+RAW EXCEL / MANUAL INPUT        ↓INGESTION + SOURCE HASH        ↓RAW BANK TRANSACTION        ↓NORMALIZATION  ├─ direction: IN / OUT / TRANSFER  ├─ counterparty  ├─ bank amount  └─ legacy code        ↓CLASSIFICATION  ├─ receivable payment  ├─ direct income  ├─ expense  ├─ bank fee/tax  ├─ bank interest  ├─ allocation/fund  ├─ internal transfer  └─ exception        ↓REVIEW / APPROVAL        ↓POSTING ENGINE        ↓JOURNAL ENTRY + JOURNAL LINES        ↓GL / AR / FUND / BANK RECONCILIATION        ↓REPORTS + DRILL-DOWN + AUDIT TRAIL
+REV3-02. Semantic Contract: Bank vs Accounting
+Layer
+Makna
+Field wajib
+Bank statement
+Posisi rekening menurut bank
+bank_debit_amount, bank_credit_amount, statement_balance
+Transaction
+Makna bisnis
+direction, transaction_type, counterparty_id, amount
+Journal
+Dampak akuntansi LP Ma’arif
+journal_debit, journal_credit, account_id
+RULE:bank_credit_amount > 0 → direction = IN → saldo bank bertambahbank_debit_amount  > 0 → direction = OUT → saldo bank berkurangContoh:MI Darwata Sindangbarang | Kredit Bank Rp852.000→ direction=IN→ counterparty_role=PAYER/DEPOSITOR→ jika pelunasan AR: Dr Bank / Cr Receivable→ jika direct income: Dr Bank / Cr RevenuePajak/Admin Bank | Debet Bank→ direction=OUT→ counterparty_role=PAYEE=BANK→ Dr Bank Fee/Tax Expense / Cr Bank
+Jangan pernah memakai field 'debit'/'credit' generik untuk bank statement dan journal sekaligus.
+Label UI harus eksplisit: 'Debet Bank', 'Kredit Bank', 'Debit Jurnal', 'Kredit Jurnal'.
+Unit test wajib membuktikan bahwa bank CREDIT tidak menghasilkan journal CREDIT secara otomatis.
+REV3-03. Transaction State Machine
+BANK TRANSACTION:IMPORTED → NORMALIZED → CLASSIFIED → REVIEWED → APPROVED → POSTED                         └→ EXCEPTION / REJECTEDPOSTED → REVERSEDPERIOD:OPEN → SOFT_CLOSE → CLOSED  ↑                    |  └── REOPEN (authorized + audited)RECONCILIATION:UNMATCHED → SUGGESTED → MATCHED                    └→ PARTIAL / EXCEPTION
+Status transition hanya boleh dilakukan oleh service/domain layer.
+Frontend tidak boleh langsung mengubah status posted/closed melalui field update.
+Setiap transition menyimpan actor, timestamp, reason, dan source.
+REV3-04. Database Amendments
+Entity
+Tambahan Rev.3
+Alasan
+bank_imports
+file_hash, mapping_version, source_name, imported_by
+Idempotency dan audit
+bank_transactions
+raw_row_json, row_fingerprint, direction, classification_status
+Traceability
+counterparty_aliases
+normalized_alias, counterparty_id
+Matching konsisten
+transactions
+source_type, source_id, approval_status
+Unified business aggregate
+journal_entries
+period_id, status, posted_at, reversal_of
+Period + immutable posting
+journal_lines
+debit, credit, account_id, dimensions
+Double-entry
+receivable_allocations
+allocated_amount, allocated_at
+Partial/multi payment
+fund_allocations
+allocated, committed, realized, returned
+Fund control
+reconciliations
+statement_balance, ledger_balance, difference, status
+Bank close
+audit_logs
+actor, action, before, after, reason
+Non-repudiation
+Money menggunakan DECIMAL fixed precision atau integer Rupiah; bukan FLOAT.
+Posted records tidak dihapus atau diedit.
+Posting, AR allocation, fund realization, dan reconciliation menggunakan database transaction.
+Gunakan row/version locking untuk mencegah double allocation.
+Foreign key, unique constraint, dan check constraint wajib aktif di database.
+REV3-05. COA Governance
+Range
+Kebijakan Rev.3
+1100–1999
+Aset/kas/bank/piutang; normal balance umumnya debit.
+2000–2999
+Dana/alokasi/kewajiban legacy; tidak boleh diasumsikan satu tipe.
+3000–3999
+Modal/pembelian/persediaan/legacy; mapping fungsi wajib.
+4000–4999
+Pendapatan; bedakan revenue recognition dari AR settlement.
+5000–5999
+Beban/operasional/legacy; mixed usage wajib canonical mapping.
+Legacy code dipertahankan untuk histori.
+Posting baru menggunakan canonical account.
+Mapping legacy→canonical mempunyai effective date dan approval.
+Kode mixed/ambiguous tidak boleh auto-post sampai accounting owner menyetujui mapping.
+Laporan harus menggunakan report_group, bukan asumsi dari nomor kode semata.
+REV3-06. Bank Import: Idempotency dan Source Trace
+SOURCE FILE→ SHA/file hash→ import batch→ raw row→ row fingerprint→ normalized transactionFingerprint minimal:organization + bank_account + statement_date + row_sequence/reference+ bank_debit + bank_credit + normalized raw description
+Import yang sama dua kali tidak boleh membuat financial transaction kedua.
+Jika bank mengubah format, mapping version disimpan pada import batch.
+Raw row wajib dapat dibuka dari transaction detail.
+Saldo berjalan divalidasi; mismatch menjadi exception, bukan silent correction.
+REV3-07. Classification & AI Guardrail
+Explicit approved user mapping.
+Exact invoice/reference.
+Approved legacy-code mapping.
+Deterministic category rule.
+Counterparty + category + amount/date matching.
+AI/fuzzy suggestion.
+UNCLASSIFIED queue.
+AI tidak boleh menjadi sumber kebenaran akuntansi.
+AI hanya memberi suggested transaction type, counterparty, receivable, atau account.
+Suggestion menyimpan confidence dan evidence.
+Posting membutuhkan rule deterministic atau human approval.
+Rejected suggestion tidak boleh mengubah histori yang sudah posted.
+REV3-08. Piutang: Unapplied Cash dan Allocation
+RECEIVABLE:ISSUED → PARTIALLY_PAID → PAID          └→ OVERDUEPAYMENT:BANK/CASH IN→ IDENTIFY PAYER→ MATCH RECEIVABLE→ ALLOCATE→ REDUCE OUTSTANDING→ POST Dr BANK/CASH / Cr AR
+Satu payment dapat dialokasikan ke banyak piutang.
+Satu piutang dapat menerima banyak payment.
+Pembayaran yang belum ter-match berstatus UNAPPLIED; jangan otomatis menjadi revenue.
+Opening AR harus dipisahkan dari revenue periode berjalan.
+Overpayment harus mengikuti policy eksplisit: block, customer credit, atau advance.
+REV3-09. Fund / Allocation Control
+FUND BALANCE:allocated- committed- realized+ returned= availableFormula final harus mengikuti policy organisasi; jangan hard-code bila accounting policy belum disahkan.
+Akun 21xx/22xx tidak otomatis berarti expense atau liability.
+Fund memiliki code, name, fiscal year, source/program, purpose, dan account mapping.
+Disbursement harus terhubung ke fund realization.
+Negative available balance diblokir kecuali policy advance/deficit mengizinkan.
+RINCIAN KAS RIIL dibangun dari fund/allocation + bank/cash dimensions.
+REV3-10. Bank Reconciliation
+Match level
+Kondisi
+Aksi
+L1 Exact
+reference + amount
+Auto-match
+L2 Strong
+date window + amount + counterparty
+Suggestion
+L3 Composite
+amount + category + alias
+Suggestion + review
+L4 Manual
+tidak ada deterministic match
+Manual match / create journal
+Statement ending = opening - bank debits + bank creditsLedger bank ending = opening + posted cash-in - posted cash-outDifference = statement ending - ledger ending
+Reconciled berarti bank transaction terhubung ke journal yang benar, bukan sekadar ada journal.
+Match evidence menyimpan user, timestamp, dan metode.
+Unmatched/exception tetap tampil.
+Close period tidak boleh menghilangkan reconciling items tanpa approval.
+REV3-11. Reporting as a Derived System
+Report
+Source of truth
+Kontrol
+Buku Bank
+bank_transactions + posted bank ledger
+raw-row drill-down
+Jurnal Umum
+journal_entries/lines
+balanced
+Buku Besar
+journal_lines
+opening + movement + ending
+Trial Balance
+ledger
+debit=credit
+Piutang
+receivables + allocations
+outstanding/aging
+Alokasi Dana
+funds + allocations + realizations
+allocated/committed/realized
+Rekonsiliasi
+reconciliation
+statement vs ledger
+Neraca
+ledger + report mapping
+must balance
+Arus Kas
+cash ledger + approved classification
+ending cash tie-out
+Rincian Kas Riil
+fund + bank/cash dimensions
+Excel-compatible totals
+Tidak boleh ada report yang membaca posisi sel Excel secara hard-coded.
+Setiap amount harus drill-down: report → journal line → transaction → raw bank row.
+Export menyimpan period, filter, timestamp, dan report version.
+REV3-12. Migration & Golden Test
+Freeze source workbook dan simpan hash.
+Import raw bank rows tanpa posting.
+Normalize counterparty, aliases, dan legacy codes.
+Load opening balances.
+Load opening AR.
+Apply approved mappings.
+Generate draft journals.
+Validate and approve.
+Post.
+Reconcile each bank account.
+Generate reports.
+Compare to workbook; semua discrepancy harus resolved atau approved.
+Maret 2026 bukan hanya sample UI; ia adalah fixture regression.
+RINCIAN MAKMUR tidak dimigrasikan.
+Setiap migrated row harus traceable ke source sheet/row.
+REV3-13. Baseline Rekening Maret 2026
+Rekening
+Opening
+Bank Debet
+Bank Kredit
+Ending
+BRI Giro 308
+Rp72.125.396,20
+Rp5.539,00
+Rp9.077.695,00
+Rp81.197.552,20
+BRI Giro 304
+Rp469.776.285,00
+Rp124.258.949,00
+Rp101.846.004,00
+Rp447.363.340,00
+BRI Tabungan 538
+Rp571.955.656,80
+Rp61.193,00
+Rp109.362.464,00
+Rp681.256.927,80
+Angka di atas adalah kontrol rekonstruksi dari workbook, bukan jurnal aplikasi. Sistem harus dapat menjelaskan setiap selisih sampai level transaksi.
+REV3-14. Security & Internal Control
+Role
+Akses minimum
+SUPER_ADMIN
+system/tenant configuration; tidak routine posting
+ACCOUNTING_ADMIN
+COA, mappings, periods, approvals
+ACCOUNTING_OPERATOR
+import, classification, AR, draft
+RECONCILER
+bank reconciliation
+APPROVER
+journal/adjustment/close
+REPORT_VIEWER
+read/export
+AUDITOR
+read-only + audit
+Least privilege dan tenant isolation.
+Material adjustment dan period close memakai approval.
+Bank account number dimasking.
+Audit log append-only: actor, timestamp, entity, action, before/after, reason.
+Export dan attachment mengikuti permission.
+REV3-15. Non-Functional Requirements
+Area
+Requirement
+Correctness
+100% posted journals balanced.
+Consistency
+Atomic posting, allocation, reconciliation.
+Idempotency
+Retry import tidak duplicate.
+Performance
+Pagination/indexing; heavy report optimization.
+Availability
+Automated backup.
+Recovery
+RPO/RTO ditetapkan; restore test.
+Security
+RBAC, isolation, secure session/transport.
+Observability
+Structured logs, job status, error monitoring.
+Maintainability
+Versioned migrations + automated tests.
+Exportability
+Excel/PDF + traceability.
+REV3-16. Testing Strategy
+Layer
+Minimum test
+Unit
+direction, money, journal balance, normal balance, AR allocation
+Domain
+transaction state, period state, fund state
+Integration
+import→classification→journal; payment→AR; posting→GL
+Reconciliation
+exact/partial/unmatched/duplicate
+Migration
+row counts, totals, source trace
+Reporting
+golden totals vs workbook
+Security
+RBAC + tenant isolation
+E2E
+full March 2026 workflow
+Three bank ending balances match.
+Bank debit/credit totals match.
+Every posted journal balances.
+AR movement reconciles.
+Fund movement follows approved policy.
+Balance sheet balances.
+Cash flow ending cash ties to ledger.
+All unexplained discrepancies block release.
+REV3-17. Backup, Recovery, Deployment
+Backup otomatis dengan retention policy.
+Restore drill berkala; backup belum teruji restore dianggap belum valid.
+Deployment: backup checkpoint → migration dry-run → tests → smoke test → release.
+Rollback plan wajib ada untuk migration yang berisiko.
+Period close membuat immutable close marker/snapshot.
+Background import/report jobs memiliki status dan error details.
+REV3-18. MVP Revised
+MVP / Must-have
+Advanced
+Auth/RBAC/tenant isolation
+2FA/SSO
+Fiscal periods + closing
+Multi-entity
+COA + legacy mapping
+Rule builder
+Counterparty + aliases
+AI entity resolution
+3 bank accounts + Excel import
+Bank API/feed
+Raw + normalized transactions
+Auto-learning classification
+Deterministic classification
+AI matching
+Journal engine + reversal
+Advanced workflows
+AR + payment allocation
+Collections
+Fund/allocation core
+Budget/commitment
+Bank reconciliation
+Continuous reconciliation
+Core reports + drill-down
+Advanced analytics
+Audit + backup/restore
+SIEM/advanced monitoring
+March 2026 golden test
+Automated monthly regression
+REV3-19. Agentic AI Build Prompts
+Phase 0 — Discovery
+Do not code. Read Rev.3 + workbook. Produce domain map, mappings, unresolved decisions, risks, and invariants. Exclude RINCIAN MAKMUR.
+Phase 1 — Database
+Implement schema, constraints, enums, audit fields, idempotency, and period states. Separate bank debit/credit from journal debit/credit.
+Phase 2 — Accounting Engine
+Implement deterministic double-entry, balanced journals, approval, immutable posting, reversal, and period checks.
+Phase 3 — Bank Import
+Implement versioned Excel import, raw preservation, direction normalization, row fingerprint, and running-balance validation.
+Phase 4 — Classification
+Implement deterministic precedence. AI/fuzzy only as suggestions with evidence/confidence.
+Phase 5 — Receivable
+Implement AR lifecycle, partial/multi allocation, unapplied cash, aging, and journal links.
+Phase 6 — Fund
+Implement allocation/commitment/realization/return and approved mapping.
+Phase 7 — Reconciliation
+Implement exact/strong/manual matching, exceptions, evidence, and close prerequisites.
+Phase 8 — Reporting
+Build from ledger/domain data; never hard-code Excel cell positions.
+Phase 9 — Security/Ops
+Implement RBAC, isolation, audit, backups, restore procedure, monitoring, secure exports.
+Phase 10 — Golden Test
+Load March 2026 fixture. Compare bank, ledger, AR, fund, cash flow, balance sheet, and report totals. Stop on unexplained differences.
+Phase 11 — Release
+Run migration dry-run, backup, tests, reconciliation, permissions, smoke tests, and rollback validation.
+REV3-20. Risk Register
+Risk
+Impact
+Mitigation
+Bank Debet/Kredit salah tafsir
+Wrong journal
+Separate fields + invariants + tests
+Legacy COA mixed
+Wrong report
+Canonical mapping + approval/version
+Unapplied receipt → revenue
+Income overstated
+UNAPPLIED state
+Allocation → expense
+Wrong fund/P&L
+Fund domain + mapping
+Duplicate import
+Double cash
+Fingerprint/idempotency
+Edit posted journal
+Audit failure
+Immutable + reversal
+Closed period changed
+Report drift
+Close lock + reopen audit
+AI misclassification
+Financial error
+Human-in-loop
+Report copied from Excel
+Inconsistency
+Ledger as source of truth
+No restore test
+Data loss
+Restore drill
+REV3-21. Decisions Wajib Dikunci Sebelum Production
+Basis pelaporan: cash, accrual, atau hybrid yang eksplisit.
+Definisi resmi 21xx/22xx dan perlakuan dana/alokasi.
+Canonical mapping seluruh legacy code yang ambiguous/mixed.
+Kapan transaksi dianggap revenue versus AR settlement.
+Kebijakan overpayment dan unapplied cash.
+Materiality threshold untuk adjustment approval.
+Role approval journal, reconciliation, dan close.
+RPO/RTO dan retention backup.
+Format laporan final sebagai signed-off golden output.
+Cash-flow classification resmi organisasi.
+REV3-22. Keputusan yang Sudah Dikunci
+MI Darwata Sindangbarang pada Kredit bank = pembayar/penyetor.
+Kredit bank = IN; Debet bank = OUT.
+RINCIAN MAKMUR tidak menjadi modul aplikasi.
+Maret 2026 menjadi golden regression dataset.
+Bank statement harus melalui normalization/classification sebelum posting.
+REV3-23. Definition of Done
+Import tiga rekening tanpa duplicate.
+MI Darwata Rp852.000 tampil sebagai IN + PAYER/DEPOSITOR dan traceable ke raw Excel row.
+Pembayaran piutang mengurangi AR, bukan menciptakan revenue kedua.
+Bank fee/tax dan interest menghasilkan journal yang benar.
+Transfer antar rekening P&L-neutral.
+Posted journal balanced dan immutable.
+Reconciliation memiliki evidence dan difference yang jelas.
+CLOSED period menolak posting.
+Semua laporan drill-down ke journal/bank source.
+RINCIAN MAKMUR tidak ada di menu/schema/import/report.
+Maret 2026 golden test menghasilkan discrepancy 0 atau approved explanation.
+Restore test berhasil sebelum go-live.
+REV3-24. Rulebook Final
+R01 Bank CREDIT ≠ Journal CREDIT. Bank CREDIT means cash-in.R02 Bank DEBIT ≠ Journal DEBIT. Bank DEBIT means cash-out.R03 Direction derives from bank movement.R04 Counterparty role follows direction/context.R05 Unapplied cash is not revenue by default.R06 Receivable settlement reduces AR.R07 Transfer is internal and P&L-neutral.R08 Allocation/fund requires approved mapping.R09 Posted journals are immutable; correction uses reversal.R10 Imports are idempotent and raw rows are retained.R11 Period close is enforced at database/service layer.R12 Reports derive from ledger, not spreadsheet cells.R13 AI suggests; approved rules decide posting.R14 RINCIAN MAKMUR is out of scope.R15 March 2026 is the golden regression fixture.
