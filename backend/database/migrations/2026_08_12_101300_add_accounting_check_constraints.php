@@ -15,6 +15,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         // journal_lines: debit and credit >= 0
         DB::statement('ALTER TABLE journal_lines ADD CONSTRAINT chk_journal_lines_debit_non_negative CHECK (debit >= 0)');
         DB::statement('ALTER TABLE journal_lines ADD CONSTRAINT chk_journal_lines_credit_non_negative CHECK (credit >= 0)');
@@ -43,6 +47,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         DB::statement('ALTER TABLE journal_lines DROP CONSTRAINT IF EXISTS chk_journal_lines_debit_non_negative');
         DB::statement('ALTER TABLE journal_lines DROP CONSTRAINT IF EXISTS chk_journal_lines_credit_non_negative');
         DB::statement('ALTER TABLE journal_lines DROP CONSTRAINT IF EXISTS chk_journal_lines_one_side_only');
