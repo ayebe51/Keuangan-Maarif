@@ -14,6 +14,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RbacSeeder::class,
             OrganizationSeeder::class,
+            CoaSeeder::class,
         ]);
     }
 }
