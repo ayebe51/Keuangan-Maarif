@@ -111,3 +111,50 @@ class BankAccountService
                             'account_id' => $bankAccount->account_id,
                             'is_active' => true,
                         ]
+                    );
+                } else {
+                    AccountMapping::where('organization_id', $orgId)
+                        ->where('mapping_type', AccountMapping::TYPE_BANK_ACCOUNT)
+                        ->where('mapping_key', (string) $bankAccount->id)
+                        ->delete();
+                }
+            }
+
+            if ($user) {
+                AuditService::log(
+                    action: 'BANK_ACCOUNT_UPDATED',
+                    modelType: BankAccount::class,
+                    modelId: $bankAccount->id,
+                    oldValues: $before,
+                    newValues: $bankAccount->fresh()->toArray(),
+                    userId: $user->id,
+                    organizationId: $orgId
+                );
+            }
+
+            return $bankAccount;
+        });
+    }
+
+    public function delete(BankAccount $bankAccount, ?User $user = null): void
+    {
+        DB::transaction(function () use ($bankAccount, $user) {
+            $orgId = (int) $bankAccount->organization_id;
+            $before = $bankAccount->toArray();
+
+            // Soft delete
+            $bankAccount->delete();
+
+            if ($user) {
+                AuditService::log(
+                    action: 'BANK_ACCOUNT_DELETED',
+                    modelType: BankAccount::class,
+                    modelId: $bankAccount->id,
+                    oldValues: $before,
+                    userId: $user->id,
+                    organizationId: $orgId
+                );
+            }
+        });
+    }
+}
