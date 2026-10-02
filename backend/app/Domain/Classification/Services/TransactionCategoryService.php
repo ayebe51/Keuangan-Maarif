@@ -89,3 +89,40 @@ class TransactionCategoryService
             $before = $category->toArray();
             $category->update($data);
 
+            if ($user) {
+                AuditService::log(
+                    action: 'TRANSACTION_CATEGORY_UPDATED',
+                    modelType: TransactionCategory::class,
+                    modelId: $category->id,
+                    oldValues: $before,
+                    newValues: $category->fresh()->toArray(),
+                    userId: $user->id,
+                    organizationId: $orgId
+                );
+            }
+
+            return $category;
+        });
+    }
+
+    public function delete(TransactionCategory $category, ?User $user = null): void
+    {
+        DB::transaction(function () use ($category, $user) {
+            $orgId = (int) $category->organization_id;
+            $before = $category->toArray();
+
+            $category->delete();
+
+            if ($user) {
+                AuditService::log(
+                    action: 'TRANSACTION_CATEGORY_DELETED',
+                    modelType: TransactionCategory::class,
+                    modelId: $category->id,
+                    oldValues: $before,
+                    userId: $user->id,
+                    organizationId: $orgId
+                );
+            }
+        });
+    }
+}
