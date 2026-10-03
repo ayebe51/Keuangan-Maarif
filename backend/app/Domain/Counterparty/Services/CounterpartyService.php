@@ -242,3 +242,64 @@ class CounterpartyService
             ->where('organization_id', $organizationId)
             ->where('role', Counterparty::ROLE_BANK)
             ->where('code', 'BANK-BRI')
+            ->first();
+
+        if (!$cp) {
+            $cp = Counterparty::create([
+                'organization_id' => $organizationId,
+                'role' => Counterparty::ROLE_BANK,
+                'code' => 'BANK-BRI',
+                'name' => $bankName,
+                'is_active' => true,
+            ]);
+
+            $aliases = [
+                'Bank BRI',
+                'BRI',
+                'Pajak Bulanan (Bank)',
+                'Adm Bank',
+                'Bunga Rekening (Bank)',
+                'BIAYA ADM',
+                'PAJAK BUNGA',
+            ];
+
+            foreach ($aliases as $alias) {
+                try {
+                    $this->addAlias($cp, $alias, CounterpartyAlias::SOURCE_SYSTEM);
+                } catch (\Exception $e) {
+                    // Ignore if already registered
+                }
+            }
+        }
+
+        return $cp;
+    }
+
+    public function getOrCreateSystemInternal(int $organizationId, string $name = 'LP Ma\'arif NU'): Counterparty
+    {
+        $cp = Counterparty::withoutGlobalScopes()
+            ->where('organization_id', $organizationId)
+            ->where('role', Counterparty::ROLE_INTERNAL)
+            ->where('code', 'INTERNAL-MAARIF')
+            ->first();
+
+        if (!$cp) {
+            $cp = Counterparty::create([
+                'organization_id' => $organizationId,
+                'role' => Counterparty::ROLE_INTERNAL,
+                'code' => 'INTERNAL-MAARIF',
+                'name' => $name,
+                'is_active' => true,
+            ]);
+
+            try {
+                $this->addAlias($cp, $name, CounterpartyAlias::SOURCE_SYSTEM);
+                $this->addAlias($cp, 'Internal LP Maarif', CounterpartyAlias::SOURCE_SYSTEM);
+            } catch (\Exception $e) {
+                // Ignore if already registered
+            }
+        }
+
+        return $cp;
+    }
+}
