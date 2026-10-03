@@ -40,3 +40,38 @@ class FundAllocation extends Model
     ];
 
     protected $appends = [
+        'available_amount',
+    ];
+
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class, 'organization_id');
+    }
+
+    public function fund(): BelongsTo
+    {
+        return $this->belongsTo(Fund::class, 'fund_id');
+    }
+
+    public function fiscalPeriod(): BelongsTo
+    {
+        return $this->belongsTo(FiscalPeriod::class, 'fiscal_period_id');
+    }
+
+    /**
+     * Invariant: available = allocated - committed - disbursed + returned
+     */
+    public function getAvailableAmountAttribute(): string
+    {
+        $allocated = Money::of($this->allocated_amount ?? 0);
+        $committed = Money::of($this->committed_amount ?? 0);
+        $disbursed = Money::of($this->disbursed_amount ?? 0);
+        $returned = Money::of($this->returned_amount ?? 0);
+
+        return $allocated
+            ->subtract($committed)
+            ->subtract($disbursed)
+            ->add($returned)
+            ->getAmount();
+    }
+}
