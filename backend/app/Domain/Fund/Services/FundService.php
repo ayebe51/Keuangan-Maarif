@@ -159,3 +159,198 @@ class FundService
             }
 
             $period = $this->fiscalPeriodService->ensureDateInOpenPeriod(
+                $effectiveDate,
+                $orgId
+            );
+
+            $allocated = Money::of($data['allocated_amount']);
+            if (!$allocated->isPositive()) {
+                throw new InvalidArgumentException("Allocated amount must be greater than zero.");
+            }
+
+            $allocation = FundAllocation::create([
+                'organization_id' => $orgId,
+                'fund_id' => $fund->id,
+                'fiscal_period_id' => $data['fiscal_period_id'] ?? $period->id,
+                'description' => $data['description'] ?? null,
+                'allocated_amount' => $allocated->getAmount(),
+                'committed_amount' => '0.00',
+                'disbursed_amount' => '0.00',
+                'returned_amount' => '0.00',
+                'status' => $data['status'] ?? FundAllocation::STATUS_ACTIVE,
+            ]);
+
+            if ($user) {
+                AuditService::log(
+                    action: 'FUND_ALLOCATION_CREATED',
+                    modelType: FundAllocation::class,
+                    modelId: $allocation->id,
+                    newValues: $allocation->toArray(),
+                    userId: $user->id,
+                    organizationId: $orgId
+                );
+            }
+
+            return $allocation;
+        });
+    }
+
+    public function commit(FundAllocation $allocation, float|string $amount, ?User $user = null): FundAllocation
+    {
+        return DB::transaction(function () use ($allocation, $amount, $user) {
+            $fund = $allocation->fund;
+            $amt = Money::of($amount);
+            if (!$amt->isPositive()) {
+                throw new InvalidArgumentException("Commit amount must be greater than zero.");
+            }
+
+            $available = Money::of($allocation->available_amount);
+            if ($amt->isGreaterThan($available)) {
+                throw new NegativeFundBalanceException(
+                    fundCode: $fund->code,
+                    attemptedAmount: $amt->getAmount(),
+                    availableAmount: $available->getAmount()
+                );
+            }
+
+            $before = $allocation->toArray();
+            $newCommitted = Money::of($allocation->committed_amount)->add($amt);
+            $allocation->committed_amount = $newCommitted->getAmount();
+            $allocation->save();
+
+            if ($user) {
+                AuditService::log(
+                    action: 'FUND_COMMITTED',
+                    modelType: FundAllocation::class,
+                    modelId: $allocation->id,
+                    oldValues: $before,
+                    newValues: $allocation->fresh()->toArray(),
+                    userId: $user->id,
+                    organizationId: $allocation->organization_id
+                );
+            }
+
+            return $allocation;
+        });
+    }
+
+    public function disburse(
+        FundAllocation $allocation,
+        float|string $amount,
+        bool $fromCommitted = false,
+        ?User $user = null
+    ): FundAllocation {
+        return DB::transaction(function () use ($allocation, $amount, $fromCommitted, $user) {
+            $fund = $allocation->fund;
+            $amt = Money::of($amount);
+            if (!$amt->isPositive()) {
+                throw new InvalidArgumentException("Disburse amount must be greater than zero.");
+            }
+
+            if ($fromCommitted) {
+                $committed = Money::of($allocation->committed_amount);
+                if ($amt->isGreaterThan($committed)) {
+                    throw new NegativeFundBalanceException(
+                        fundCode: $fund->code,
+                        attemptedAmount: $amt->getAmount(),
+                        availableAmount: $committed->getAmount(),
+                        message: "Cannot disburse {$amt->getAmount()} from committed balance. Committed is only {$committed->getAmount()}."
+                    );
+                }
+                $newCommitted = $committed->subtract($amt);
+                $allocation->committed_amount = $newCommitted->getAmount();
+            } else {
+                $available = Money::of($allocation->available_amount);
+                if ($amt->isGreaterThan($available)) {
+                    throw new NegativeFundBalanceException(
+                        fundCode: $fund->code,
+                        attemptedAmount: $amt->getAmount(),
+                        availableAmount: $available->getAmount()
+                    );
+                }
+            }
+
+            $before = $allocation->toArray();
+            $newDisbursed = Money::of($allocation->disbursed_amount)->add($amt);
+            $allocation->disbursed_amount = $newDisbursed->getAmount();
+            $allocation->save();
+
+            if ($user) {
+                AuditService::log(
+                    action: 'FUND_DISBURSED',
+                    modelType: FundAllocation::class,
+                    modelId: $allocation->id,
+                    oldValues: $before,
+                    newValues: $allocation->fresh()->toArray(),
+                    userId: $user->id,
+                    organizationId: $allocation->organization_id
+                );
+            }
+
+            return $allocation;
+        });
+    }
+
+    public function returnFunds(FundAllocation $allocation, float|string $amount, ?User $user = null): FundAllocation
+    {
+        return DB::transaction(function () use ($allocation, $amount, $user) {
+            $amt = Money::of($amount);
+            if (!$amt->isPositive()) {
+                throw new InvalidArgumentException("Return amount must be greater than zero.");
+            }
+
+            $before = $allocation->toArray();
+            $newReturned = Money::of($allocation->returned_amount)->add($amt);
+            $allocation->returned_amount = $newReturned->getAmount();
+            $allocation->save();
+
+            if ($user) {
+                AuditService::log(
+                    action: 'FUND_RETURNED',
+                    modelType: FundAllocation::class,
+                    modelId: $allocation->id,
+                    oldValues: $before,
+                    newValues: $allocation->fresh()->toArray(),
+                    userId: $user->id,
+                    organizationId: $allocation->organization_id
+                );
+            }
+
+            return $allocation;
+        });
+    }
+
+    public function getSummary(Fund $fund): array
+    {
+        $allocations = $fund->allocations;
+
+        $totalAllocated = Money::zero();
+        $totalCommitted = Money::zero();
+        $totalDisbursed = Money::zero();
+        $totalReturned = Money::zero();
+
+        foreach ($allocations as $alloc) {
+            $totalAllocated = $totalAllocated->add(Money::of($alloc->allocated_amount ?? 0));
+            $totalCommitted = $totalCommitted->add(Money::of($alloc->committed_amount ?? 0));
+            $totalDisbursed = $totalDisbursed->add(Money::of($alloc->disbursed_amount ?? 0));
+            $totalReturned = $totalReturned->add(Money::of($alloc->returned_amount ?? 0));
+        }
+
+        $totalAvailable = $totalAllocated
+            ->subtract($totalCommitted)
+            ->subtract($totalDisbursed)
+            ->add($totalReturned);
+
+        return [
+            'fund_id' => $fund->id,
+            'code' => $fund->code,
+            'name' => $fund->name,
+            'budget_amount' => $fund->budget_amount,
+            'total_allocated' => $totalAllocated->getAmount(),
+            'total_committed' => $totalCommitted->getAmount(),
+            'total_disbursed' => $totalDisbursed->getAmount(),
+            'total_returned' => $totalReturned->getAmount(),
+            'total_available' => $totalAvailable->getAmount(),
+        ];
+    }
+}
