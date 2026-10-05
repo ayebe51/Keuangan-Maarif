@@ -39,6 +39,10 @@ class FundAllocation extends Model
         'returned_amount' => 'string',
     ];
 
+    protected $appends = [
+        'available_amount',
+    ];
+
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class, 'organization_id');

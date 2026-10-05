@@ -147,8 +147,19 @@ class FundService
                 throw new CrossTenantViolationException("Fund not found or belongs to a different organization.");
             }
 
+            $effectiveDate = $data['effective_date'] ?? null;
+            if (!$effectiveDate && isset($data['fiscal_period_id'])) {
+                $fp = \App\Domain\Accounting\Models\FiscalPeriod::find($data['fiscal_period_id']);
+                if ($fp) {
+                    $effectiveDate = $fp->start_date->format('Y-m-d');
+                }
+            }
+            if (!$effectiveDate) {
+                $effectiveDate = now()->format('Y-m-d');
+            }
+
             $period = $this->fiscalPeriodService->ensureDateInOpenPeriod(
-                $data['effective_date'] ?? now()->format('Y-m-d'),
+                $effectiveDate,
                 $orgId
             );
 
