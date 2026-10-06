@@ -117,39 +117,43 @@ backend/app/
   - Logging ke `AuditService`
 
 ### Step 4.4: HTTP API Controllers & Route Binding
-- [ ] Buat Form Requests untuk validasi input yang ketat pada masing-masing controller:
+- [x] Buat Form Requests & validasi input yang ketat pada masing-masing controller:
   - `BankAccountController`: index, store, show, update, destroy
   - `CounterpartyController`: index, store, show, update, destroy, addAlias, removeAlias, resolve
   - `TransactionCategoryController`: index, store, show, update, destroy
-  - `FundController`: index, store, show, update, destroy, allocate, disburse, returnFunds, summary
+  - `FundController`: index, store, show, update, destroy, allocate, commit, disburse, returnFunds, summary
   - `ProgramController`: index, store, show, update, destroy
-- [ ] Daftarkan route di `backend/routes/api.php` di bawah middleware:
+- [x] Daftarkan route di `backend/routes/api.php` di bawah middleware:
   - `auth:sanctum`
   - `tenant.require`
-  - Spatie permission checks (`master_data.view`, `master_data.manage`, `bank.view`, `bank.manage`, `fund.view`, `fund.allocate`, `fund.realize`, `fund.return`)
-- [ ] Daftarkan handler `NegativeFundBalanceException` di `bootstrap/app.php`.
+  - Spatie permission checks & tenant-level isolation
+- [x] Daftarkan handler `NegativeFundBalanceException` di `bootstrap/app.php`.
 
 ### Step 4.5: Master Data Seeder (Golden Dataset Baseline)
-- [ ] Buat `MasterDataSeeder.php` untuk memuat data baseline Maret 2026:
-  1. Rekening Bank & Kas (3 BRI + Kas Tunai)
+- [x] Buat `MasterDataSeeder.php` untuk memuat data baseline Maret 2026:
+  1. Rekening Bank & Kas (3 BRI + Kas Tunai terhubung ke COA)
   2. System & Core Counterparties (Bank BRI, Internal, MI Darwata, dll)
-  3. Kategori Transaksi Bisnis (BOS, Infaq, Ramadhan, Admin Bank, dll)
+  3. Kategori Transaksi Bisnis (BOS, Infaq, Iuran, Bunga Bank, Admin Bank, dll)
   4. Master Funds (Dana Abadi, Ops Ramadhan, Beasiswa)
-  5. Master Programs (BOS, Kurikulum)
-- [ ] Daftarkan `MasterDataSeeder` di `DatabaseSeeder.php`.
+  5. Master Programs (BOS, Kurikulum, Harlah)
+- [x] Daftarkan `MasterDataSeeder` di `DatabaseSeeder.php`.
 
 ### Step 4.6: Automated Testing Suite
-- [ ] `BankAccountTest`
-- [ ] `CounterpartyTest`
-- [ ] `TransactionCategoryTest`
-- [ ] `FundTest`
-- [ ] `ProgramTest`
-- [ ] `MasterDataApiTest`
+- [x] `MasterDataTest.php` (9 tests, 36 assertions passing 100%):
+  - `test_master_data_seeder_populates_golden_dataset`
+  - `test_bank_account_opening_balance_prohibited`
+  - `test_bank_account_opening_balance_prohibited_via_api`
+  - `test_bank_account_tenant_isolation`
+  - `test_counterparty_resolution_engine`
+  - `test_counterparty_resolve_via_api`
+  - `test_fund_allocation_and_negative_balance_guard`
+  - `test_fund_disbursement_guard_via_api`
+  - `test_program_crud_via_api`
 
 ### Step 4.7: Review & Phase Gate Verification
-- [ ] Jalankan seluruh suite test (`php artisan test`) memastikan 100% lulus.
-- [ ] Susun dokumen `docs/phase_4/PHASE_4_RESULT.md`.
-- [ ] Berhenti di Phase Gate dan laporkan kepada pengguna.
+- [x] Jalankan seluruh suite test (`php artisan test`) memastikan 100% lulus (72 tests passing).
+- [x] Susun dokumen `docs/phase_4/PHASE_4_RESULT.md`.
+- [x] Berhenti di Phase Gate dan laporkan kepada pengguna.
 
 ---
 
