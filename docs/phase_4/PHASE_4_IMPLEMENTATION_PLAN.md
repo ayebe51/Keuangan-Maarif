@@ -156,3 +156,12 @@ backend/app/
 - [x] Berhenti di Phase Gate dan laporkan kepada pengguna.
 
 ---
+
+## 5. Kriteria Phase Gate (Pass / Fail)
+
+Phase 4 dinyatakan **PASS** apabila:
+1. Rekening bank 3 BRI + Kas Tunai terdaftar dan terhubung ke akun COA tanpa kolom `opening_balance`.
+2. Resolusi counterparty (termasuk kasus MI Darwata Sindangbarang dan Bank BRI) bekerja akurat melalui alias.
+3. Alokasi dana menegakkan formula saldo matematis dan menolak pencairan yang melampaui saldo tersedia.
+4. Seluruh endpoint Master Data terlindungi autentikasi Sanctum, RBAC Spatie, dan isolasi tenant.
+5. Seluruh test (unit & feature) lulus tanpa error atau warning.
