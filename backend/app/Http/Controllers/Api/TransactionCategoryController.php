@@ -86,3 +86,20 @@ class TransactionCategoryController extends Controller
         $updated = $this->transactionCategoryService->update($category, $validated, $request->user());
 
         return response()->json([
+            'message' => 'Kategori transaksi berhasil diperbarui.',
+            'data' => $updated->load(['debitAccount', 'creditAccount']),
+        ]);
+    }
+
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $tenantId = TenantContext::getTenantId();
+        $category = TransactionCategory::where('organization_id', $tenantId)->findOrFail($id);
+
+        $this->transactionCategoryService->delete($category, $request->user());
+
+        return response()->json([
+            'message' => 'Kategori transaksi berhasil dihapus.',
+        ]);
+    }
+}
