@@ -71,4 +71,14 @@ class BankAccount extends Model
     {
         return $this->hasMany(OpeningBalanceSource::class, 'bank_account_id');
     }
+
+    public function bankImports(): HasMany
+    {
+        return $this->hasMany(BankImport::class, 'bank_account_id');
+    }
+
+    public function bankTransactions(): HasMany
+    {
+        return $this->hasMany(BankTransaction::class, 'bank_account_id');
+    }
 }
