@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
             RbacSeeder::class,
             OrganizationSeeder::class,
             CoaSeeder::class,
+            MasterDataSeeder::class,
         ]);
     }
 }

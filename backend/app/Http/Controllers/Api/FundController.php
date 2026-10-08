@@ -177,3 +177,43 @@ class FundController extends Controller
             $allocation,
             $validated['amount'],
             $fromCommitted,
+            $request->user()
+        );
+
+        return response()->json([
+            'message' => 'Realisasi pencairan dana berhasil dicatat.',
+            'data' => $updated,
+        ]);
+    }
+
+    public function returnFunds(Request $request, int $allocationId): JsonResponse
+    {
+        $tenantId = TenantContext::getTenantId();
+        $allocation = FundAllocation::where('organization_id', $tenantId)->findOrFail($allocationId);
+
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0.01'],
+        ]);
+
+        $updated = $this->fundService->returnFunds(
+            $allocation,
+            $validated['amount'],
+            $request->user()
+        );
+
+        return response()->json([
+            'message' => 'Pengembalian sisa dana berhasil dicatat.',
+            'data' => $updated,
+        ]);
+    }
+
+    public function summary(int $id): JsonResponse
+    {
+        $tenantId = TenantContext::getTenantId();
+        $fund = Fund::where('organization_id', $tenantId)->findOrFail($id);
+
+        $summary = $this->fundService->getSummary($fund);
+
+        return response()->json(['data' => $summary]);
+    }
+}
