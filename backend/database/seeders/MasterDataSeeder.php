@@ -52,3 +52,200 @@ class MasterDataSeeder extends Seeder
                     'branch' => 'Cilacap',
                     'type' => BankAccount::TYPE_GIRO,
                     'account_id' => $accGiro304?->id,
+                ],
+                [
+                    'bank_name' => 'Bank BRI',
+                    'account_number' => '0106-01-000538-53-8',
+                    'account_name' => 'LP MAARIF NU CILACAP (TABUNGAN 538)',
+                    'branch' => 'Cilacap',
+                    'type' => BankAccount::TYPE_SAVINGS,
+                    'account_id' => $accTab538?->id,
+                ],
+                [
+                    'bank_name' => 'Kas Tunai',
+                    'account_number' => 'KAS-TUNAI-01',
+                    'account_name' => 'Kas Tunai Bendahara',
+                    'branch' => 'Kantor PC LP Ma\'arif',
+                    'type' => BankAccount::TYPE_CASH,
+                    'account_id' => $accKas?->id,
+                ],
+            ];
+
+            foreach ($bankAccounts as $baData) {
+                $ba = BankAccount::firstOrNew([
+                    'organization_id' => $orgId,
+                    'account_number' => $baData['account_number'],
+                ]);
+
+                $ba->bank_name = $baData['bank_name'];
+                $ba->account_name = $baData['account_name'];
+                $ba->branch = $baData['branch'];
+                $ba->currency = 'IDR';
+                $ba->type = $baData['type'];
+                $ba->account_id = $baData['account_id'];
+                $ba->is_active = true;
+                $ba->save();
+
+                if ($ba->account_id) {
+                    AccountMapping::firstOrCreate(
+                        [
+                            'organization_id' => $orgId,
+                            'mapping_type' => AccountMapping::TYPE_BANK_ACCOUNT,
+                            'mapping_key' => (string) $ba->id,
+                        ],
+                        [
+                            'account_id' => $ba->account_id,
+                            'is_active' => true,
+                        ]
+                    );
+                }
+            }
+
+            // 2. COUNTERPARTIES & SYSTEM ALIASES
+            // 2.1 System Bank BRI
+            $bankBri = Counterparty::firstOrCreate(
+                ['organization_id' => $orgId, 'code' => 'BANK-BRI'],
+                [
+                    'role' => Counterparty::ROLE_BANK,
+                    'name' => 'Bank BRI',
+                    'is_active' => true,
+                ]
+            );
+
+            $bankBriAliases = [
+                'Bank BRI',
+                'BRI',
+                'Adm Bank',
+                'Pajak Bulanan (Bank)',
+                'Bunga Rekening (Bank)',
+                'BIAYA ADM',
+                'PAJAK BUNGA',
+            ];
+            foreach ($bankBriAliases as $alias) {
+                CounterpartyAlias::firstOrCreate(
+                    [
+                        'organization_id' => $orgId,
+                        'counterparty_id' => $bankBri->id,
+                        'alias_name' => $alias,
+                    ],
+                    ['source' => CounterpartyAlias::SOURCE_SYSTEM]
+                );
+            }
+
+            // 2.2 System Internal LP Ma'arif
+            $internalMaarif = Counterparty::firstOrCreate(
+                ['organization_id' => $orgId, 'code' => 'INTERNAL-MAARIF'],
+                [
+                    'role' => Counterparty::ROLE_INTERNAL,
+                    'name' => 'LP Ma\'arif NU',
+                    'is_active' => true,
+                ]
+            );
+            $internalAliases = ['LP Ma\'arif NU', 'Internal LP Maarif', 'Maarif NU Cilacap'];
+            foreach ($internalAliases as $alias) {
+                CounterpartyAlias::firstOrCreate(
+                    [
+                        'organization_id' => $orgId,
+                        'counterparty_id' => $internalMaarif->id,
+                        'alias_name' => $alias,
+                    ],
+                    ['source' => CounterpartyAlias::SOURCE_SYSTEM]
+                );
+            }
+
+            // 2.3 Key Madrasah / Sekolah (Golden Dataset Counterparties)
+            $schools = [
+                [
+                    'code' => 'MI-DARWATA-01',
+                    'name' => 'MI Darwata Sindangbarang',
+                    'aliases' => ['MI Darwata Sindangbarang', 'MI Darwata', 'Darwata'],
+                ],
+                [
+                    'code' => 'MI-KESUGIHAN-01',
+                    'name' => 'MI Ma\'arif 01 Kesugihan',
+                    'aliases' => ['MI Ma\'arif 01 Kesugihan', 'MI 01 Kesugihan'],
+                ],
+                [
+                    'code' => 'MTS-CILACAP-01',
+                    'name' => 'MTs Ma\'arif 01 Cilacap',
+                    'aliases' => ['MTs Ma\'arif 01 Cilacap', 'MTs 01 Cilacap'],
+                ],
+                [
+                    'code' => 'SMK-KROYA-01',
+                    'name' => 'SMK Ma\'arif 1 Kroya',
+                    'aliases' => ['SMK Ma\'arif 1 Kroya', 'SMK 1 Kroya'],
+                ],
+            ];
+
+            foreach ($schools as $sch) {
+                $cp = Counterparty::firstOrCreate(
+                    ['organization_id' => $orgId, 'code' => $sch['code']],
+                    [
+                        'role' => Counterparty::ROLE_SCHOOL,
+                        'name' => $sch['name'],
+                        'is_active' => true,
+                    ]
+                );
+
+                foreach ($sch['aliases'] as $alias) {
+                    CounterpartyAlias::firstOrCreate(
+                        [
+                            'organization_id' => $orgId,
+                            'counterparty_id' => $cp->id,
+                            'alias_name' => $alias,
+                        ],
+                        ['source' => CounterpartyAlias::SOURCE_MANUAL]
+                    );
+                }
+            }
+
+            // 3. TRANSACTION CATEGORIES
+            $categories = [
+                // Penerimaan (IN)
+                [
+                    'code' => 'IN-BOS',
+                    'name' => 'Dana Bantuan Operasional Sekolah (BOS)',
+                    'direction' => TransactionCategory::DIRECTION_IN,
+                    'description' => 'Penerimaan dana BOS madrasah dari pemerintah / rekening penampung',
+                ],
+                [
+                    'code' => 'IN-INFAQ',
+                    'name' => 'Penerimaan Infaq & Shodaqoh',
+                    'direction' => TransactionCategory::DIRECTION_IN,
+                    'description' => 'Penerimaan infaq madrasah dan donatur',
+                ],
+                [
+                    'code' => 'IN-IURAN',
+                    'name' => 'Iuran Wajib Madrasah / Sekolah',
+                    'direction' => TransactionCategory::DIRECTION_IN,
+                    'description' => 'Iuran bulanan anggota madrasah LP Ma\'arif',
+                ],
+                [
+                    'code' => 'IN-BUNGA-BANK',
+                    'name' => 'Pendapatan Bunga Rekening Bank',
+                    'direction' => TransactionCategory::DIRECTION_IN,
+                    'description' => 'Bunga bulanan dari bank penampung',
+                ],
+
+                // Pengeluaran (OUT)
+                [
+                    'code' => 'OUT-OPS-KANTOR',
+                    'name' => 'Beban Operasional Kantor',
+                    'direction' => TransactionCategory::DIRECTION_OUT,
+                    'description' => 'Pengeluaran ATK, listrik, internet, dan kebersihan kantor',
+                ],
+                [
+                    'code' => 'OUT-ADM-BANK',
+                    'name' => 'Beban Administrasi Bank',
+                    'direction' => TransactionCategory::DIRECTION_OUT,
+                    'description' => 'Potongan biaya administrasi dan buku cek bank',
+                ],
+                [
+                    'code' => 'OUT-PAJAK-BUNGA',
+                    'name' => 'Beban Pajak Bunga Bank',
+                    'direction' => TransactionCategory::DIRECTION_OUT,
+                    'description' => 'Potongan pajak atas pendapatan bunga bank',
+                ],
+                [
+                    'code' => 'OUT-HONOR',
+                    'name' => 'Honorarium Pengurus & Tenaga Ahli',
