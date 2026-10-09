@@ -249,3 +249,111 @@ class MasterDataSeeder extends Seeder
                 [
                     'code' => 'OUT-HONOR',
                     'name' => 'Honorarium Pengurus & Tenaga Ahli',
+                    'direction' => TransactionCategory::DIRECTION_OUT,
+                    'description' => 'Insentif dan honorarium kerja staf pengurus',
+                ],
+
+                // Pemindahan Dana (TRANSFER)
+                [
+                    'code' => 'TRF-KAS-BANK',
+                    'name' => 'Setoran Kas Tunai ke Bank',
+                    'direction' => TransactionCategory::DIRECTION_TRANSFER,
+                    'description' => 'Penyetoran kas fisik ke rekening bank',
+                ],
+                [
+                    'code' => 'TRF-BANK-KAS',
+                    'name' => 'Penarikan Kas Tunai dari Bank',
+                    'direction' => TransactionCategory::DIRECTION_TRANSFER,
+                    'description' => 'Penarikan uang tunai untuk kas bendahara',
+                ],
+                [
+                    'code' => 'TRF-ANTAR-REK',
+                    'name' => 'Pemindahbukuan Antar Rekening Bank',
+                    'direction' => TransactionCategory::DIRECTION_TRANSFER,
+                    'description' => 'Transfer dana antar rekening Giro dan Tabungan',
+                ],
+            ];
+
+            foreach ($categories as $cat) {
+                TransactionCategory::firstOrCreate(
+                    ['organization_id' => $orgId, 'code' => $cat['code']],
+                    [
+                        'name' => $cat['name'],
+                        'direction' => $cat['direction'],
+                        'description' => $cat['description'] ?? null,
+                        'is_active' => true,
+                    ]
+                );
+            }
+
+            // 4. FUNDS (Master Dana Cadangan & Program)
+            $funds = [
+                [
+                    'code' => 'DANA-ABADI',
+                    'name' => 'Dana Abadi Pendidikan Ma\'arif',
+                    'fund_type' => Fund::TYPE_RESTRICTED,
+                    'budget_amount' => 500000000,
+                    'description' => 'Dana pokok abadi untuk kemaslahatan pendidikan',
+                ],
+                [
+                    'code' => 'DANA-RAMADHAN',
+                    'name' => 'Dana Kegiatan Ramadhan 1447H',
+                    'fund_type' => Fund::TYPE_TEMPORARILY_RESTRICTED,
+                    'budget_amount' => 50000000,
+                    'description' => 'Alokasi khusus operasional safari Ramadhan',
+                ],
+                [
+                    'code' => 'DANA-BEASISWA',
+                    'name' => 'Dana Beasiswa Siswa Dhuafa & Yatim',
+                    'fund_type' => Fund::TYPE_RESTRICTED,
+                    'budget_amount' => 100000000,
+                    'description' => 'Bantuan SPP dan seragam siswa kurang mampu',
+                ],
+            ];
+
+            foreach ($funds as $fData) {
+                Fund::firstOrCreate(
+                    ['organization_id' => $orgId, 'code' => $fData['code']],
+                    [
+                        'name' => $fData['name'],
+                        'fund_type' => $fData['fund_type'],
+                        'budget_amount' => $fData['budget_amount'],
+                        'description' => $fData['description'],
+                        'status' => Fund::STATUS_ACTIVE,
+                        'is_active' => true,
+                    ]
+                );
+            }
+
+            // 5. PROGRAMS (Master Dimensi Program)
+            $programs = [
+                [
+                    'code' => 'PROG-BOS',
+                    'name' => 'Program Pengelolaan BOS Madrasah',
+                    'description' => 'Pendampingan dan administrasi BOS satuan pendidikan',
+                ],
+                [
+                    'code' => 'PROG-KURIKULUM',
+                    'name' => 'Program Pengembangan Kurikulum & Literasi Aswaja',
+                    'description' => 'Pelatihan guru dan penerbitan modul ajar Aswaja',
+                ],
+                [
+                    'code' => 'PROG-HARLAH',
+                    'name' => 'Peringatan Hari Lahir LP Ma\'arif NU',
+                    'description' => 'Rangkaian lomba olimpiade sains dan perkemahan Ma\'arif',
+                ],
+            ];
+
+            foreach ($programs as $prog) {
+                Program::firstOrCreate(
+                    ['organization_id' => $orgId, 'code' => $prog['code']],
+                    [
+                        'name' => $prog['name'],
+                        'description' => $prog['description'],
+                        'is_active' => true,
+                    ]
+                );
+            }
+        });
+    }
+}
