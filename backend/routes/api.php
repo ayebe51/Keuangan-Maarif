@@ -49,6 +49,41 @@ Route::prefix('v1')->group(function () {
             Route::get('/opening-balances', [\App\Http\Controllers\Api\OpeningBalanceController::class, 'index'])->name('opening-balances.index');
             Route::post('/opening-balances', [\App\Http\Controllers\Api\OpeningBalanceController::class, 'store'])->name('opening-balances.store');
             Route::post('/opening-balances/{id}/process', [\App\Http\Controllers\Api\OpeningBalanceController::class, 'process'])->name('opening-balances.process');
+
+            // Master Data: Bank Accounts
+            Route::apiResource('bank-accounts', \App\Http\Controllers\Api\BankAccountController::class);
+
+            // Master Data: Counterparties & Aliases
+            Route::post('/counterparties/resolve', [\App\Http\Controllers\Api\CounterpartyController::class, 'resolve'])->name('counterparties.resolve');
+            Route::get('/counterparties/resolve', [\App\Http\Controllers\Api\CounterpartyController::class, 'resolve']);
+            Route::post('/counterparties/{id}/aliases', [\App\Http\Controllers\Api\CounterpartyController::class, 'addAlias'])->name('counterparties.add-alias');
+            Route::delete('/counterparties/{id}/aliases/{aliasId}', [\App\Http\Controllers\Api\CounterpartyController::class, 'removeAlias'])->name('counterparties.remove-alias');
+            Route::apiResource('counterparties', \App\Http\Controllers\Api\CounterpartyController::class);
+
+            // Master Data: Transaction Categories
+            Route::apiResource('transaction-categories', \App\Http\Controllers\Api\TransactionCategoryController::class);
+
+            // Master Data: Funds & Allocations
+            Route::get('/funds/{id}/summary', [\App\Http\Controllers\Api\FundController::class, 'summary'])->name('funds.summary');
+            Route::post('/funds/{id}/allocate', [\App\Http\Controllers\Api\FundController::class, 'allocate'])->name('funds.allocate');
+            Route::post('/funds/allocations/{allocationId}/commit', [\App\Http\Controllers\Api\FundController::class, 'commit'])->name('funds.commit');
+            Route::post('/funds/allocations/{allocationId}/disburse', [\App\Http\Controllers\Api\FundController::class, 'disburse'])->name('funds.disburse');
+            Route::post('/funds/allocations/{allocationId}/return', [\App\Http\Controllers\Api\FundController::class, 'returnFunds'])->name('funds.return');
+            Route::apiResource('funds', \App\Http\Controllers\Api\FundController::class);
+
+            // Master Data: Programs
+            Route::apiResource('programs', \App\Http\Controllers\Api\ProgramController::class);
+
+            // Phase 5: Bank Ingestion & Statement Import Engine
+            Route::post('/bank-imports', [\App\Http\Controllers\Api\BankImportController::class, 'store'])->name('bank-imports.store');
+            Route::get('/bank-imports', [\App\Http\Controllers\Api\BankImportController::class, 'index'])->name('bank-imports.index');
+            Route::get('/bank-imports/{id}', [\App\Http\Controllers\Api\BankImportController::class, 'show'])->name('bank-imports.show');
+            Route::get('/bank-imports/{id}/raw-sources', [\App\Http\Controllers\Api\BankImportController::class, 'rawSources'])->name('bank-imports.raw-sources');
+            Route::get('/bank-imports/{id}/exceptions', [\App\Http\Controllers\Api\BankImportController::class, 'exceptions'])->name('bank-imports.exceptions');
+
+            // Phase 5: Normalized Bank Transactions
+            Route::get('/bank-transactions', [\App\Http\Controllers\Api\BankTransactionController::class, 'index'])->name('bank-transactions.index');
+            Route::get('/bank-transactions/{id}', [\App\Http\Controllers\Api\BankTransactionController::class, 'show'])->name('bank-transactions.show');
         });
     });
 });
