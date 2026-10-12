@@ -71,3 +71,5 @@ class BankImport extends Model
     public function transactions(): HasMany
     {
         return $this->hasMany(BankTransaction::class, 'bank_import_id');
+    }
+}
