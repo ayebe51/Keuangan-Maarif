@@ -245,3 +245,107 @@ class XlsxBankStatementParser implements BankStatementParserInterface
             $rowNum = (int)$row['r'];
             $cells = [];
 
+            foreach ($row->c as $cell) {
+                $cellRef = (string)$cell['r'];
+                $colIndex = $this->columnLetterToIndex($cellRef);
+                $type = (string)$cell['t'];
+                $value = isset($cell->v) ? (string)$cell->v : '';
+
+                if ($type === 's' && is_numeric($value)) {
+                    $strIdx = (int)$value;
+                    $actualVal = $sharedStrings[$strIdx] ?? '';
+                } elseif ($type === 'inlineStr' && isset($cell->is->t)) {
+                    $actualVal = (string)$cell->is->t;
+                } else {
+                    $actualVal = $value;
+                }
+
+                $cells[$colIndex] = $actualVal;
+            }
+
+            // Fill missing gaps up to highest index
+            if (!empty($cells)) {
+                $maxCol = max(array_keys($cells));
+                $filled = [];
+                for ($i = 0; $i <= $maxCol; $i++) {
+                    $filled[$i] = $cells[$i] ?? '';
+                }
+                $rows[$rowNum] = $filled;
+            }
+        }
+
+        return $rows;
+    }
+
+    protected function columnLetterToIndex(string $cellRef): int
+    {
+        preg_match('/^([A-Z]+)/', strtoupper($cellRef), $matches);
+        $colLetters = $matches[1] ?? 'A';
+        $index = 0;
+        $len = strlen($colLetters);
+        for ($i = 0; $i < $len; $i++) {
+            $index = $index * 26 + (ord($colLetters[$i]) - 64);
+        }
+        return $index - 1; // 0-based
+    }
+
+    protected function looksLikeHeader(array $cells): bool
+    {
+        $normalized = array_map(fn($c) => strtolower(trim((string)$c)), $cells);
+        foreach ($normalized as $c) {
+            if (in_array($c, ['tanggal', 'tgl', 'date', 'keterangan', 'uraian', 'debet', 'kredit', 'penerimaan', 'pengeluaran', 'saldo'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected function normalizeDateValue(mixed $val): ?string
+    {
+        if ($val === null || trim((string)$val) === '') {
+            return null;
+        }
+
+        $str = trim((string)$val);
+
+        // Check if numeric Excel serial date (e.g. 46082 for March 2026)
+        if (is_numeric($str) && (float)$str > 30000 && (float)$str < 70000) {
+            // Excel epoch is 1899-12-30 (due to 1900 leap year bug)
+            $days = (int)$str;
+            $seconds = ($days - 25569) * 86400;
+            return gmdate('Y-m-d', $seconds);
+        }
+
+        return $str;
+    }
+
+    protected function resolveProfile(array $headers, string $sheetName, ?string $explicitVersion = null): StatementMappingProfileInterface
+    {
+        if ($explicitVersion) {
+            foreach ($this->profiles as $p) {
+                if ($p->name() === $explicitVersion) {
+                    return $p;
+                }
+            }
+        }
+
+        $lowerSheet = strtolower($sheetName);
+        if (str_contains($lowerSheet, 'kas')) {
+            return new BukuKasMappingProfile();
+        }
+        if (str_contains($lowerSheet, 'tabungan')) {
+            return new BriTabunganMappingProfile();
+        }
+        if (str_contains($lowerSheet, 'giro')) {
+            return new BriGiroMappingProfile();
+        }
+
+        foreach ($this->profiles as $p) {
+            if ($p->matchHeaders($headers)) {
+                return $p;
+            }
+        }
+
+        return new GenericCsvMappingProfile();
+    }
+}
