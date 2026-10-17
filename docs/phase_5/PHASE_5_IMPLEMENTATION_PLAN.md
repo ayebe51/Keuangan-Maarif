@@ -98,3 +98,199 @@ backend/app/
 ├── Domain/
 │   └── Bank/
 │       ├── Enums/
+│       │   ├── BankImportStatus.php           # pending, processing, done, failed
+│       │   ├── BankTransactionDirection.php   # IN, OUT
+│       │   └── BankTransactionStatus.php      # unmatched, matched, reconciled, excluded
+│       ├── Exceptions/
+│       │   ├── DuplicateImportException.php
+│       │   ├── InvalidBankStatementFormatException.php
+│       │   └── UnsupportedBankFormatException.php
+│       ├── Models/
+│       │   ├── BankAccount.php                # (Existing Phase 4)
+│       │   ├── BankImport.php                 # Header batch impor + audit hash
+│       │   ├── BankRawSource.php              # Preservasi baris mentah spreadsheet
+│       │   └── BankTransaction.php            # Mutasi perbankan ternormalisasi
+│       ├── Parsers/
+│       │   ├── Contracts/
+│       │   │   ├── BankStatementParserInterface.php
+│       │   │   └── StatementMappingProfileInterface.php
+│       │   ├── Profiles/
+│       │   │   ├── BriGiroMappingProfile.php   # Layout kolom BRI Giro
+│       │   │   ├── BriTabunganMappingProfile.php # Layout kolom BRI Tabungan
+│       │   │   ├── BukuKasMappingProfile.php   # Layout kolom Buku Kas
+│       │   │   └── GenericCsvMappingProfile.php # Layout CSV standar
+│       │   ├── CsvBankStatementParser.php      # Parser CSV (RFC 4180 + Autodetect)
+│       │   ├── XlsxBankStatementParser.php     # Parser XLSX OpenXML native streaming
+│       │   └── BankStatementParserFactory.php  # Resolver parser & mapping otomatis
+│       └── Services/
+│           ├── BankImportService.php           # Orkestrator impor & transaksi DB
+│           ├── BankTransactionNormalizer.php   # Transformasi raw row -> DTO ternormalisasi
+│           ├── FingerprintGenerator.php        # Algoritma deterministik SHA-256 (REV3-06)
+│           └── RunningBalanceValidator.php     # Validasi kontinuitas saldo berjalan
+├── Http/
+│   └── Controllers/Api/
+│       ├── BankImportController.php            # Upload, list, batch details & exception queue
+│       └── BankTransactionController.php       # Query mutasi bank & drill-down raw source
+```
+
+---
+
+## 5. Rencana Langkah Kerja (Step-by-Step Execution Plan)
+
+### Step 5.1: Database Schema & Migrations
+- [ ] **Migration 1:** `add_enhanced_columns_to_bank_imports_table`  
+  - Tambahkan kolom pada `bank_imports`:
+    - `file_hash` (string 64, SHA-256)
+    - `file_path` (string 500, nullable)
+    - `mapping_version` (string 50, default `'bri_v1'`)
+    - `has_discrepancies` (boolean, default false)
+  - Tambahkan index `(organization_id, bank_account_id, file_hash)`
+- [ ] **Migration 2:** `create_bank_raw_sources_table`  
+  - Buat tabel `bank_raw_sources` dengan kolom:
+    - `id`, `organization_id`, `bank_import_id`, `bank_account_id`
+    - `source_file` (string 300)
+    - `source_sheet` (string 100, nullable)
+    - `source_row` (integer)
+    - `raw_data` (JSONB / JSON)
+    - `row_fingerprint` (string 64)
+    - `status` (`pending`, `normalized`, `duplicate`, `error`)
+    - `error_code` (string 50, nullable: `INVALID_DATE`, `INVALID_AMOUNT`, `BALANCE_DISCREPANCY`)
+    - `error_message` (text, nullable)
+    - `timestamps`
+  - Index: `(organization_id, bank_import_id)`, `(organization_id, row_fingerprint)`, `(organization_id, status)`
+- [ ] **Migration 3:** `add_raw_source_and_sequence_to_bank_transactions_table`  
+  - Tambahkan kolom pada `bank_transactions`:
+    - `raw_source_id` (nullable FK ke `bank_raw_sources(id)` on delete set null)
+    - `row_sequence` (integer default 1)
+
+---
+
+### Step 5.2: Domain Models & Enums
+- [ ] Buat Enums:
+  - `BankImportStatus`: `PENDING`, `PROCESSING`, `DONE`, `FAILED`
+  - `BankTransactionDirection`: `IN`, `OUT`
+  - `BankTransactionStatus`: `UNMATCHED`, `MATCHED`, `RECONCILED`, `EXCLUDED`
+- [ ] Buat Domain Exceptions:
+  - `DuplicateImportException` (HTTP 409)
+  - `InvalidBankStatementFormatException` (HTTP 422)
+  - `UnsupportedBankFormatException` (HTTP 415)
+- [ ] Buat Model `BankRawSource`:
+  - Trait `BelongsToTenant`
+  - Casts: `raw_data` (array), `source_row` (integer)
+  - Relasi ke `BankImport`, `BankAccount`, dan `BankTransaction`
+- [ ] Buat Model `BankImport`:
+  - Trait `BelongsToTenant`
+  - Relasi ke `BankAccount`, `User` (`importedBy`), `rawSources()`, `transactions()`
+  - Scope: filter per periode, per rekening, per status
+- [ ] Buat Model `BankTransaction`:
+  - Trait `BelongsToTenant`
+  - Relasi ke `BankAccount`, `BankImport`, `BankRawSource`, `Counterparty`
+  - Casts: `amount` (string decimal), `balance_after` (string decimal), `transaction_date` (date), `value_date` (date)
+  - Accessor: `is_credit` (IN), `is_debit` (OUT)
+
+---
+
+### Step 5.3: Parsing Engine & Extensible Mapping Profiles
+- [ ] Interface:
+  - `BankStatementParserInterface`: contract `parse(string $filePath, array $options = []): array`
+  - `StatementMappingProfileInterface`: definisi indeks/nama kolom tanggal, keterangan, debet, kredit, saldo, referensi.
+- [ ] Mapping Profiles:
+  - `BriGiroMappingProfile`: kolom Tanggal, Keterangan, Debet, Kredit, Saldo
+  - `BriTabunganMappingProfile`: kolom No, Tanggal, Transaksi/Uraian, Debet, Kredit, Saldo
+  - `BukuKasMappingProfile`: kolom Tanggal, No Bukti, Uraian, Penerimaan (Kredit), Pengeluaran (Debet), Saldo
+  - `GenericCsvMappingProfile`: format standar industri
+- [ ] `CsvBankStatementParser`:
+  - Deteksi delimiter otomatis (koma `,`, titik koma `;`, tab `\t`).
+  - Pembersihan BOM UTF-8 dan karakter non-ASCII tersembunyi.
+  - Deteksi baris header secara dinamis.
+- [ ] `XlsxBankStatementParser`:
+  - Parser OpenXML streaming berbasis PHP native `ZipArchive` dan `SimpleXML` (zero 3rd-party bloat).
+  - Ekstraksi `sharedStrings.xml` dan lembar kerja XML.
+  - Multi-sheet routing: jika parameter `sheet_name` kosong, deteksi otomatis berdasarkan kecocokan nama/nomor rekening (`308`, `304`, `538`, `Kas`), atau fallback ke sheet pertama.
+  - Konversi serial date Excel (`46082` $\rightarrow$ `2026-03-01`) dengan koreksi *Excel 1900 leap year bug*.
+- [ ] `BankStatementParserFactory`:
+  - Deteksi ekstensi file (`.csv`, `.xlsx`, `.xls`) dan pemetaan otomatis ke parser yang sesuai.
+
+---
+
+### Step 5.4: Normalization, Fingerprinting & Validation Services
+- [ ] `FingerprintGenerator` (REV3-06):
+  - Mengimplementasikan rumus deterministik SHA-256:
+    ```php
+    sha256(implode('|', [
+        $orgId,
+        $bankAccountId,
+        $normalizedDate, // Y-m-d
+        $rowSequence,    // 1, 2, ... kejadian berurutan pada tanggal yang sama
+        $direction,      // IN atau OUT
+        number_format($amount, 2, '.', ''),
+        $normalizedDescription
+    ]))
+    ```
+- [ ] `BankTransactionNormalizer`:
+  - Normalisasi Tanggal: menangani format Indonesia (`dd/mm/yyyy`, `dd-mm-yyyy`, `d Bulan yyyy`) serta serial date.
+  - Normalisasi Nominal: pembersihan simbol `Rp`, spasi, titik ribuan vs koma desimal, tanda kurung negatif, konversi eksklusif menggunakan string/bcmath (tanpa konversi float).
+  - Normalisasi Teks Keterangan: uppercase, hapus spasi ganda, trim.
+  - Resolusi Arah Arus Kas: Kredit $\rightarrow$ `IN`, Debet $\rightarrow$ `OUT`.
+  - Integrasi `CounterpartyService::resolve()` untuk memetakan deskripsi ke entitas rekanan.
+- [ ] `RunningBalanceValidator` (REV3-06):
+  - Memverifikasi kontinuitas saldo jika kolom saldo tersedia:
+    $$\text{balance}_{t} = \text{balance}_{t-1} + \text{credit}_{t} - \text{debit}_{t}$$
+  - Menandai mismatch sebagai audit exception tanpa mengubah data mentah secara diam-diam.
+- [ ] `BankImportService`:
+  - Orkestrator impor menyeluruh yang aman:
+    1. Validasi MIME dan ukuran file (maksimal 10MB).
+    2. Hitung SHA-256 `file_hash`.
+    3. Cek duplikasi file pada rekening yang sama $\implies$ lempar `DuplicateImportException`.
+    4. Simpan file ke storage lokal terproteksi (`bank_imports/{tenant_id}/{year}/{hash}.ext`).
+    5. Buat entitas `BankImport` dengan status `processing`.
+    6. Parse baris mentah dan simpan ke `bank_raw_sources`.
+    7. Normalisasi setiap baris, generate fingerprint dengan penomoran sequence.
+    8. Cek fingerprint pada database:
+       - Jika duplikat: tandai `raw_source` status `duplicate`, `skipped_rows++`.
+       - Jika valid baru: buat `bank_transactions`, tautkan `raw_source_id`, `imported_rows++`.
+    9. Jalankan `RunningBalanceValidator` untuk mendeteksi anomali saldo.
+    10. Hitung rentang tanggal mutasi (`period_start`, `period_end`).
+    11. Finalisasi status `BankImport` menjadi `done` dan catat audit log.
+
+---
+
+### Step 5.5: HTTP API Controllers & Routes
+- [ ] `BankImportController`:
+  - `POST /api/v1/bank-imports`: Upload file (multipart/form-data: `file`, `bank_account_id`, opsional: `sheet_name`, `mapping_version`).
+  - `GET /api/v1/bank-imports`: List seluruh batch impor dengan pagination & filtering.
+  - `GET /api/v1/bank-imports/{id}`: Detail batch impor, metrik (`imported`, `skipped`, `error`), dan ringkasan transaksi.
+  - `GET /api/v1/bank-imports/{id}/raw-sources`: Audit trail baris mentah dari file asli.
+  - `GET /api/v1/bank-imports/{id}/exceptions`: Antrean baris error/duplikat/anomali saldo untuk verifikasi operator (*Exception Queue*).
+- [ ] `BankTransactionController`:
+  - `GET /api/v1/bank-transactions`: List mutasi bank ternormalisasi dengan filter:
+    - `bank_account_id`
+    - `date_from`, `date_to`
+    - `direction` (`IN`, `OUT`)
+    - `status` (`unmatched`, `matched`, `reconciled`, `excluded`)
+    - `counterparty_id`
+    - `search` (keterangan atau nomor referensi)
+  - `GET /api/v1/bank-transactions/{id}`: Detail mutasi lengkap dengan relasi `rawSource`, `bankAccount`, dan `counterparty`.
+- [ ] Daftarkan seluruh endpoint di `backend/routes/api.php` di bawah middleware `auth:sanctum` dan `tenant.require`.
+- [ ] Daftarkan exception renderers (`DuplicateImportException`, `InvalidBankStatementFormatException`) di `backend/bootstrap/app.php`.
+
+---
+
+### Step 5.6: Automated Testing Suite (`BankImportTest.php`)
+Membangun test suite komprehensif mencakup 11 skenario kritis:
+- [ ] **Test 1: CSV Statement Ingestion (Normal Flow)**  
+  Menguji parsing file CSV (koma & titik koma), memverifikasi seluruh baris terimpor dengan arah kas yang tepat.
+- [ ] **Test 2: XLSX Statement Ingestion (Native OpenXML Streaming)**  
+  Menguji parser OpenXML native pada spreadsheet Excel, mengonversi serial date dan sheet selection dengan presisi.
+- [ ] **Test 3: Bank Semantics Invariant (Bank Credit ≠ Accounting Credit)**  
+  Memverifikasi mutasi Kredit bank menghasilkan `direction = IN` dan nominal positif.
+- [ ] **Test 4: Idempotency & Zero Financial Duplication (Phase Gate Core)**  
+  Mengunggah ulang file yang sama persis:
+  - Request kedua menolak duplikasi file (`DuplicateImportException`).
+  - Mengunggah file baru yang memuat 3 baris lama dan 2 baris baru: sistem mengimpor 2 baris baru dan melewati 3 baris lama (`skipped_rows = 3`, `imported_rows = 2`), dengan total record transaksi perbankan tetap akurat.
+- [ ] **Test 5: Same-Day Multiple Identical Transactions Disambiguation**  
+  Memverifikasi bahwa dua transaksi terpisah pada hari yang sama dengan nominal dan keterangan yang identik (misal 2x biaya admin Rp 2.500) **tidak hilang**, melainkan keduanya berhasil diimpor dengan `row_sequence` berbeda.
+- [ ] **Test 6: Raw Source Preservation & Drill-Down Audit**  
+  Memverifikasi bahwa setiap baris `BankTransaction` terhubung ke `BankRawSource` yang menyimpan `source_file`, `source_sheet`, `source_row`, dan JSON asli.
+- [ ] **Test 7: Running Balance Discrepancy Detection (REV3-06)**  
+  Memverifikasi bahwa jika terdapat lonjakan saldo atau ketidakcocokan saldo berjalan pada baris mutasi bank, sistem mencatat exception pada antrean audit tanpa melakukan silent override.
