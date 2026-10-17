@@ -78,3 +78,11 @@ class BankTransactionController extends Controller
                 'counterparty',
                 'rawSource',
                 'bankImport:id,filename,file_hash,format,created_at',
+            ])
+            ->findOrFail($id);
+
+        return response()->json([
+            'data' => $tx,
+        ]);
+    }
+}

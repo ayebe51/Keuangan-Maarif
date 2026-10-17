@@ -49,6 +49,58 @@ Route::prefix('v1')->group(function () {
             Route::get('/opening-balances', [\App\Http\Controllers\Api\OpeningBalanceController::class, 'index'])->name('opening-balances.index');
             Route::post('/opening-balances', [\App\Http\Controllers\Api\OpeningBalanceController::class, 'store'])->name('opening-balances.store');
             Route::post('/opening-balances/{id}/process', [\App\Http\Controllers\Api\OpeningBalanceController::class, 'process'])->name('opening-balances.process');
+
+            // Master Data: Bank Accounts
+            Route::apiResource('bank-accounts', \App\Http\Controllers\Api\BankAccountController::class);
+
+            // Master Data: Counterparties & Aliases
+            Route::post('/counterparties/resolve', [\App\Http\Controllers\Api\CounterpartyController::class, 'resolve'])->name('counterparties.resolve');
+            Route::get('/counterparties/resolve', [\App\Http\Controllers\Api\CounterpartyController::class, 'resolve']);
+            Route::post('/counterparties/{id}/aliases', [\App\Http\Controllers\Api\CounterpartyController::class, 'addAlias'])->name('counterparties.add-alias');
+            Route::delete('/counterparties/{id}/aliases/{aliasId}', [\App\Http\Controllers\Api\CounterpartyController::class, 'removeAlias'])->name('counterparties.remove-alias');
+            Route::apiResource('counterparties', \App\Http\Controllers\Api\CounterpartyController::class);
+
+            // Master Data: Transaction Categories
+            Route::apiResource('transaction-categories', \App\Http\Controllers\Api\TransactionCategoryController::class);
+
+            // Master Data: Funds & Allocations
+            Route::get('/funds/{id}/summary', [\App\Http\Controllers\Api\FundController::class, 'summary'])->name('funds.summary');
+            Route::post('/funds/{id}/allocate', [\App\Http\Controllers\Api\FundController::class, 'allocate'])->name('funds.allocate');
+            Route::post('/funds/allocations/{allocationId}/commit', [\App\Http\Controllers\Api\FundController::class, 'commit'])->name('funds.commit');
+            Route::post('/funds/allocations/{allocationId}/disburse', [\App\Http\Controllers\Api\FundController::class, 'disburse'])->name('funds.disburse');
+            Route::post('/funds/allocations/{allocationId}/return', [\App\Http\Controllers\Api\FundController::class, 'returnFunds'])->name('funds.return');
+            Route::apiResource('funds', \App\Http\Controllers\Api\FundController::class);
+
+            // Master Data: Programs
+            Route::apiResource('programs', \App\Http\Controllers\Api\ProgramController::class);
+
+            // Phase 5: Bank Ingestion & Statement Import Engine
+            Route::post('/bank-imports', [\App\Http\Controllers\Api\BankImportController::class, 'store'])->name('bank-imports.store');
+            Route::get('/bank-imports', [\App\Http\Controllers\Api\BankImportController::class, 'index'])->name('bank-imports.index');
+            Route::get('/bank-imports/{id}', [\App\Http\Controllers\Api\BankImportController::class, 'show'])->name('bank-imports.show');
+            Route::get('/bank-imports/{id}/raw-sources', [\App\Http\Controllers\Api\BankImportController::class, 'rawSources'])->name('bank-imports.raw-sources');
+            Route::get('/bank-imports/{id}/exceptions', [\App\Http\Controllers\Api\BankImportController::class, 'exceptions'])->name('bank-imports.exceptions');
+
+            // Phase 5: Normalized Bank Transactions
+            Route::get('/bank-transactions', [\App\Http\Controllers\Api\BankTransactionController::class, 'index'])->name('bank-transactions.index');
+            Route::get('/bank-transactions/{id}', [\App\Http\Controllers\Api\BankTransactionController::class, 'show'])->name('bank-transactions.show');
+
+            // Phase 6: Classification Rules Engine
+            Route::post('/classification-rules/reorder', [\App\Http\Controllers\Api\ClassificationRuleController::class, 'reorder'])->name('classification-rules.reorder');
+            Route::apiResource('classification-rules', \App\Http\Controllers\Api\ClassificationRuleController::class);
+
+            // Phase 6: Transaction Classification Pipeline & Review Queue
+            Route::post('/transactions/classify-batch', [\App\Http\Controllers\Api\TransactionClassificationController::class, 'classifyBatch'])->name('transactions.classify-batch');
+            Route::post('/transactions/{id}/classify', [\App\Http\Controllers\Api\TransactionClassificationController::class, 'classifySingle'])->name('transactions.classify');
+            Route::get('/transactions/unclassified', [\App\Http\Controllers\Api\TransactionClassificationController::class, 'getUnclassified'])->name('transactions.unclassified');
+            Route::get('/transactions/suggestions', [\App\Http\Controllers\Api\TransactionClassificationController::class, 'getSuggestions'])->name('transactions.suggestions');
+            Route::post('/transactions/suggestions/{id}/apply', [\App\Http\Controllers\Api\TransactionClassificationController::class, 'applySuggestion'])->name('transactions.apply-suggestion');
+            Route::post('/transactions/suggestions/{id}/reject', [\App\Http\Controllers\Api\TransactionClassificationController::class, 'rejectSuggestion'])->name('transactions.reject-suggestion');
+            Route::post('/transactions/{id}/manual-classify', [\App\Http\Controllers\Api\TransactionClassificationController::class, 'manualClassify'])->name('transactions.manual-classify');
+
+            // Phase 6: Business Transactions
+            Route::get('/business-transactions', [\App\Http\Controllers\Api\BusinessTransactionController::class, 'index'])->name('business-transactions.index');
+            Route::get('/business-transactions/{id}', [\App\Http\Controllers\Api\BusinessTransactionController::class, 'show'])->name('business-transactions.show');
         });
     });
 });

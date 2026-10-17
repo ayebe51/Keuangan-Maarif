@@ -94,4 +94,41 @@ return Application::configure(basePath: dirname(__DIR__))
                 'error' => 'OPENING_BALANCE_CONFIG_ERROR',
             ], 422);
         });
+
+        $exceptions->render(function (\App\Domain\Fund\Exceptions\NegativeFundBalanceException $e, Request $request) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => 'NEGATIVE_FUND_BALANCE',
+                'fund_code' => $e->fundCode,
+                'attempted_amount' => $e->attemptedAmount,
+                'available_amount' => $e->availableAmount,
+            ], 422);
+        });
+
+        $exceptions->render(function (\App\Domain\Bank\Exceptions\DuplicateImportException $e, Request $request) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => 'DUPLICATE_IMPORT',
+                'filename' => $e->filename,
+                'file_hash' => $e->fileHash,
+                'bank_account_id' => $e->bankAccountId,
+            ], 409);
+        });
+
+        $exceptions->render(function (\App\Domain\Bank\Exceptions\InvalidBankStatementFormatException $e, Request $request) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => 'INVALID_BANK_STATEMENT_FORMAT',
+                'filename' => $e->filename,
+                'details' => $e->details,
+            ], 422);
+        });
+
+        $exceptions->render(function (\App\Domain\Bank\Exceptions\UnsupportedBankFormatException $e, Request $request) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'error' => 'UNSUPPORTED_BANK_FORMAT',
+                'format' => $e->format,
+            ], 415);
+        });
     })->create();
