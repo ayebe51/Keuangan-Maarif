@@ -294,3 +294,35 @@ Membangun test suite komprehensif mencakup 11 skenario kritis:
   Memverifikasi bahwa setiap baris `BankTransaction` terhubung ke `BankRawSource` yang menyimpan `source_file`, `source_sheet`, `source_row`, dan JSON asli.
 - [ ] **Test 7: Running Balance Discrepancy Detection (REV3-06)**  
   Memverifikasi bahwa jika terdapat lonjakan saldo atau ketidakcocokan saldo berjalan pada baris mutasi bank, sistem mencatat exception pada antrean audit tanpa melakukan silent override.
+- [ ] **Test 8: Counterparty Auto-Resolution Integration**  
+  Memverifikasi bahwa baris dengan deskripsi *"Bunga Rekening (Bank)"* otomatis terhubung ke `BANK-BRI`, dan baris *"SETORAN MI DARWATA"* otomatis terhubung ke `MI-DARWATA-01`.
+- [ ] **Test 9: Golden Dataset Baseline Reconciliation (REV3-13)**  
+  Memverifikasi bahwa impor mutasi Maret 2026 menghasilkan total Debet dan Kredit yang persis sama dengan dokumen spesifikasi:
+  - BRI Giro 308: Debet Rp5.539,00, Kredit Rp9.077.695,00
+  - BRI Giro 304: Debet Rp124.258.949,00, Kredit Rp101.846.004,00
+  - BRI Tabungan 538: Debet Rp61.193,00, Kredit Rp109.362.464,00
+- [ ] **Test 10: Multi-Tenant Isolation**  
+  Memverifikasi bahwa file yang diimpor pada Tenant A tidak dapat diakses atau dilihat oleh Admin Tenant B.
+- [ ] **Test 11: Error Resilience & Anomaly Isolation**  
+  Baris korup (misal: kolom nominal bukan angka) dicatat pada `error_rows` dan `bank_raw_sources.error_message` tanpa membatalkan baris-baris mutasi yang valid.
+
+---
+
+### Step 5.7: Review & Phase Gate Verification
+- [ ] Jalankan seluruh suite test (`php artisan test`) memastikan 100% lulus (target $\ge 83$ test cases passing).
+- [ ] Susun dokumen rilis `docs/phase_5/PHASE_5_RESULT.md`.
+- [ ] Evaluasi kriteria Phase Gate dan laporkan kepada pengguna.
+
+---
+
+## 6. Kriteria Phase Gate (Pass / Fail)
+
+Phase 5 dinyatakan **PASS** apabila:
+1. **Duplicate Import = Zero Duplicate Financial Transactions**: Unggah ulang file mutasi atau rekaman yang sama sama sekali tidak menghasilkan duplikasi record di `bank_transactions`.
+2. **Bank Semantics Respected**: Mutasi Kredit bank selalu ternormalisasi menjadi `direction = IN`, dan Debet bank menjadi `direction = OUT`.
+3. **Raw Preservation Guaranteed**: Setiap mutasi perbankan dapat ditelusuri kembali (*drill-down*) hingga ke file, sheet, dan nomor baris sumber aslinya.
+4. **Running Balance Verification Enforced**: Saldo berjalan divalidasi dan setiap selisih dicatat sebagai audit exception.
+5. **Counterparty Resolution Working**: Sistem mengaitkan transaksi bank dengan entitas counterparty yang sesuai berdasarkan aturan Phase 4.
+6. **Golden Dataset Baseline Reconciled**: Total nominal Debet/Kredit Maret 2026 terbukti klop tanpa selisih 1 sen pun.
+7. **Multi-Tenant Scoped**: Seluruh data mutasi dan batch impor terisolasi per organisasi.
+8. **100% Test Suite Pass**: Seluruh test berjalan hijau tanpa kegagalan atau regresi pada modul akuntansi sebelumnya.
