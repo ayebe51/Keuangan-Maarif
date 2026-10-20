@@ -359,3 +359,200 @@ class BankImportTest extends TestCase
         $resp3 = $this->postJson('/api/v1/bank-imports', [
             'file' => $file3,
             'bank_account_id' => $this->account308->id,
+        ]);
+        $resp3->assertStatus(201);
+        $resp3->assertJson([
+            'data' => [
+                'total_rows' => 4,
+                'imported_rows' => 2,
+                'skipped_rows' => 2,
+            ],
+        ]);
+
+        // CRITICAL INVARIANT: Zero duplicate financial transactions created! Total must be 4.
+        $this->assertDatabaseCount('bank_transactions', 4);
+    }
+
+    /**
+     * Test 5: Same-Day Multiple Identical Transactions Disambiguation (row_sequence)
+     */
+    public function test_same_day_multiple_identical_transactions_preserved(): void
+    {
+        Sanctum::actingAs($this->adminA);
+        TenantContext::setTenantId($this->orgA->id);
+
+        $csvPath = $this->createSampleCsv('same_day_twins.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-15', 'BIAYA ADM BANK BRI', '2.500,00', '', '97.500,00'],
+            ['2026-03-15', 'BIAYA ADM BANK BRI', '2.500,00', '', '95.000,00'], // Identical amount, desc, date
+        ]);
+
+        $import = $this->importService->importFile($csvPath, $this->account308->id, $this->adminA);
+
+        $this->assertEquals(2, $import->imported_rows);
+        $this->assertEquals(0, $import->skipped_rows);
+
+        $txs = BankTransaction::where('transaction_date', '2026-03-15')
+            ->where('amount', '2500.00')
+            ->orderBy('row_sequence')
+            ->get();
+
+        $this->assertCount(2, $txs);
+        $this->assertEquals(1, $txs[0]->row_sequence);
+        $this->assertEquals(2, $txs[1]->row_sequence);
+        $this->assertNotEquals($txs[0]->fingerprint, $txs[1]->fingerprint);
+    }
+
+    /**
+     * Test 6: Raw Source Preservation & Drill-Down Audit
+     */
+    public function test_raw_source_preservation_and_drill_down_audit(): void
+    {
+        Sanctum::actingAs($this->adminA);
+        TenantContext::setTenantId($this->orgA->id);
+
+        $csvPath = $this->createSampleCsv('audit_sample.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-20', 'Dana BOS Batch 1', '', '50.000.000,00', '50.000.000,00'],
+        ]);
+
+        $import = $this->importService->importFile($csvPath, $this->account308->id, $this->adminA);
+
+        $tx = BankTransaction::where('bank_import_id', $import->id)->firstOrFail();
+        $this->assertNotNull($tx->raw_source_id);
+
+        $rawSource = BankRawSource::find($tx->raw_source_id);
+        $this->assertNotNull($rawSource);
+        $this->assertEquals('audit_sample.csv', $rawSource->source_file);
+        $this->assertEquals(2, $rawSource->source_row);
+        $this->assertIsArray($rawSource->raw_data);
+
+        // API Drill-Down assertion
+        $response = $this->getJson("/api/v1/bank-transactions/{$tx->id}");
+        $response->assertStatus(200);
+        $response->assertJson([
+            'data' => [
+                'id' => $tx->id,
+                'raw_source' => [
+                    'source_file' => 'audit_sample.csv',
+                    'source_row' => 2,
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Test 7: Running Balance Discrepancy Detection (REV3-06)
+     */
+    public function test_running_balance_discrepancy_flagged_as_audit_exception(): void
+    {
+        Sanctum::actingAs($this->adminA);
+        TenantContext::setTenantId($this->orgA->id);
+
+        // Row 1: Saldo 100.000, +50.000 => Saldo seharusnya 150.000, tapi bank reported 180.000! (Gap 30.000)
+        $csvPath = $this->createSampleCsv('discrepancy_statement.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-01', 'Setoran 1', '', '100.000,00', '100.000,00'],
+            ['2026-03-02', 'Setoran 2', '', '50.000,00', '180.000,00'],
+        ]);
+
+        $import = $this->importService->importFile($csvPath, $this->account308->id, $this->adminA);
+
+        $this->assertTrue($import->has_discrepancies);
+
+        // Verify exception queue API
+        $response = $this->getJson("/api/v1/bank-imports/{$import->id}/exceptions");
+        $response->assertStatus(200);
+        $response->assertJsonFragment([
+            'error_code' => 'BALANCE_DISCREPANCY',
+        ]);
+    }
+
+    /**
+     * Test 8: Counterparty Auto-Resolution Integration
+     */
+    public function test_counterparty_auto_resolution_links_correct_entity(): void
+    {
+        Sanctum::actingAs($this->adminA);
+        TenantContext::setTenantId($this->orgA->id);
+
+        // Setup counterparties from seeder: Bank BRI, MI Darwata
+        $bri = Counterparty::where('code', 'BANK-BRI')->firstOrFail();
+        $miDarwata = Counterparty::where('code', 'MI-DARWATA-01')->firstOrFail();
+
+        $csvPath = $this->createSampleCsv('cp_resolution.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-05', 'BIAYA ADM BANK BRI MARET', '12.000,00', '', '1.000.000,00'],
+            ['2026-03-06', 'SETORAN DANA INFAQ DARI MI DARWATA SINDANGBARANG', '', '852.000,00', '1.852.000,00'],
+        ]);
+
+        $this->importService->importFile($csvPath, $this->account308->id, $this->adminA);
+
+        $txBri = BankTransaction::where('description', 'LIKE', '%ADM BANK BRI%')->firstOrFail();
+        $txMadrasah = BankTransaction::where('description', 'LIKE', '%MI DARWATA%')->firstOrFail();
+
+        $this->assertEquals($bri->id, $txBri->counterparty_id);
+        $this->assertEquals($miDarwata->id, $txMadrasah->counterparty_id);
+    }
+
+    /**
+     * Test 9: Golden Dataset Baseline Reconciliation (REV3-13 Exact March 2026 Totals)
+     */
+    public function test_golden_dataset_march_2026_totals_reconciled(): void
+    {
+        Sanctum::actingAs($this->adminA);
+        TenantContext::setTenantId($this->orgA->id);
+
+        // 1. BRI Giro 308: Debet Rp5.539,00, Kredit Rp9.077.695,00
+        $csv308 = $this->createSampleCsv('golden_308.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-01', 'Setoran Penerimaan Giro 308', '', '9.077.695,00', '81.203.091,20'],
+            ['2026-03-02', 'Beban Administrasi Buku Cek 308', '5.539,00', '', '81.197.552,20'],
+        ]);
+        $this->importService->importFile($csv308, $this->account308->id, $this->adminA);
+
+        $debit308 = BankTransaction::where('bank_account_id', $this->account308->id)
+            ->where('direction', BankTransactionDirection::OUT)
+            ->sum('amount');
+        $credit308 = BankTransaction::where('bank_account_id', $this->account308->id)
+            ->where('direction', BankTransactionDirection::IN)
+            ->sum('amount');
+
+        $this->assertEquals('5539.00', number_format($debit308, 2, '.', ''));
+        $this->assertEquals('9077695.00', number_format($credit308, 2, '.', ''));
+
+        // 2. BRI Giro 304: Debet Rp124.258.949,00, Kredit Rp101.846.004,00
+        $csv304 = $this->createSampleCsv('golden_304.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-05', 'Penerimaan Piutang & Setoran Giro 304', '', '101.846.004,00', '571.622.289,00'],
+            ['2026-03-10', 'Pencairan Operasional & Transfer Giro 304', '124.258.949,00', '', '447.363.340,00'],
+        ]);
+        $this->importService->importFile($csv304, $this->account304->id, $this->adminA);
+
+        $debit304 = BankTransaction::where('bank_account_id', $this->account304->id)
+            ->where('direction', BankTransactionDirection::OUT)
+            ->sum('amount');
+        $credit304 = BankTransaction::where('bank_account_id', $this->account304->id)
+            ->where('direction', BankTransactionDirection::IN)
+            ->sum('amount');
+
+        $this->assertEquals('124258949.00', number_format($debit304, 2, '.', ''));
+        $this->assertEquals('101846004.00', number_format($credit304, 2, '.', ''));
+
+        // 3. BRI Tabungan 538: Debet Rp61.193,00, Kredit Rp109.362.464,00
+        $csv538 = $this->createSampleCsv('golden_538.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-15', 'Penerimaan Setoran Tabungan 538', '', '109.362.464,00', '681.318.120,80'],
+            ['2026-03-20', 'Pajak & Biaya Tabungan 538', '61.193,00', '', '681.256.927,80'],
+        ]);
+        $this->importService->importFile($csv538, $this->account538->id, $this->adminA);
+
+        $debit538 = BankTransaction::where('bank_account_id', $this->account538->id)
+            ->where('direction', BankTransactionDirection::OUT)
