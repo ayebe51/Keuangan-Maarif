@@ -556,3 +556,82 @@ class BankImportTest extends TestCase
 
         $debit538 = BankTransaction::where('bank_account_id', $this->account538->id)
             ->where('direction', BankTransactionDirection::OUT)
+            ->sum('amount');
+        $credit538 = BankTransaction::where('bank_account_id', $this->account538->id)
+            ->where('direction', BankTransactionDirection::IN)
+            ->sum('amount');
+
+        $this->assertEquals('61193.00', number_format($debit538, 2, '.', ''));
+        $this->assertEquals('109362464.00', number_format($credit538, 2, '.', ''));
+    }
+
+    /**
+     * Test 10: Multi-Tenant Isolation
+     */
+    public function test_multi_tenant_isolation_strictly_enforced(): void
+    {
+        Sanctum::actingAs($this->adminA);
+        TenantContext::setTenantId($this->orgA->id);
+
+        $csvPath = $this->createSampleCsv('tenant_a_stmt.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-01', 'Setoran Rahasia Org A', '', '1.000.000,00', '1.000.000,00'],
+        ]);
+
+        $importA = $this->importService->importFile($csvPath, $this->account308->id, $this->adminA);
+        $txA = BankTransaction::where('bank_import_id', $importA->id)->firstOrFail();
+
+        // Switch to Admin Tenant B
+        Sanctum::actingAs($this->adminB);
+        TenantContext::setTenantId($this->orgB->id);
+
+        // Tenant B cannot view Tenant A's import batch
+        $respImport = $this->getJson("/api/v1/bank-imports/{$importA->id}");
+        $respImport->assertStatus(404);
+
+        // Tenant B cannot view Tenant A's bank transactions
+        $respTx = $this->getJson("/api/v1/bank-transactions/{$txA->id}");
+        $respTx->assertStatus(404);
+
+        // Tenant B listing bank transactions gets empty list
+        $respList = $this->getJson('/api/v1/bank-transactions');
+        $respList->assertStatus(200);
+        $respList->assertJsonCount(0, 'data');
+    }
+
+    /**
+     * Test 11: Error Resilience & Anomaly Isolation (Corrupt Rows)
+     */
+    public function test_error_resilience_corrupt_rows_do_not_abort_batch(): void
+    {
+        Sanctum::actingAs($this->adminA);
+        TenantContext::setTenantId($this->orgA->id);
+
+        $csvPath = $this->createSampleCsv('resilience_sample.csv', [
+            'Tanggal', 'Keterangan', 'Debet', 'Kredit', 'Saldo'
+        ], [
+            ['2026-03-01', 'Baris Valid 1', '', '100.000,00', '100.000,00'],
+            ['TANGGAL_KORUP', 'Baris Error Tanggal', '', '50.000,00', '150.000,00'], // Corrupt date
+            ['2026-03-03', 'Baris Error Amount', 'BUKAN_ANGKA', 'BUKAN_ANGKA', '150.000,00'], // Corrupt amount
+            ['2026-03-04', 'Baris Valid 2', '25.000,00', '', '125.000,00'],
+        ]);
+
+        $import = $this->importService->importFile($csvPath, $this->account308->id, $this->adminA);
+
+        $this->assertEquals(4, $import->total_rows);
+        $this->assertEquals(2, $import->imported_rows);
+        $this->assertEquals(2, $import->error_rows);
+        $this->assertEquals(0, $import->skipped_rows);
+        $this->assertEquals(BankImportStatus::DONE, $import->status);
+
+        $this->assertDatabaseCount('bank_transactions', 2);
+        $this->assertDatabaseCount('bank_raw_sources', 4);
+
+        $errors = BankRawSource::where('bank_import_id', $import->id)
+            ->where('status', BankRawSource::STATUS_ERROR)
+            ->get();
+
+        $this->assertCount(2, $errors);
+    }
+}
