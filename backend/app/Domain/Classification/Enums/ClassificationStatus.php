@@ -12,3 +12,7 @@ enum ClassificationStatus: string
     case REJECTED = 'rejected';
 
     public function isPendingReview(): bool
+    {
+        return in_array($this, [self::UNCLASSIFIED, self::SUGGESTED], true);
+    }
+}
