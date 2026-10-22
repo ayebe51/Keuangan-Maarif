@@ -35,3 +35,6 @@ return new class extends Migration
             $table->dropForeign(['business_transaction_id']);
             $table->dropIndex('bank_tx_org_clf_status_idx');
             $table->dropColumn(['classification_status', 'business_transaction_id']);
+        });
+    }
+};

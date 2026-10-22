@@ -4,6 +4,7 @@ namespace App\Domain\Accounting\Models;
 
 use App\Domain\Accounting\Exceptions\AlreadyReversedException;
 use App\Domain\Accounting\Exceptions\ImmutableJournalException;
+use App\Domain\Classification\Models\BusinessTransaction;
 use App\Domain\Organization\Traits\BelongsToTenant;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -31,6 +32,7 @@ class JournalEntry extends Model
     protected $fillable = [
         'organization_id',
         'fiscal_period_id',
+        'business_transaction_id',
         'entry_number',
         'entry_date',
         'entry_type',
@@ -97,6 +99,11 @@ class JournalEntry extends Model
     public function fiscalPeriod(): BelongsTo
     {
         return $this->belongsTo(FiscalPeriod::class, 'fiscal_period_id');
+    }
+
+    public function businessTransaction(): BelongsTo
+    {
+        return $this->belongsTo(BusinessTransaction::class, 'business_transaction_id');
     }
 
     public function postedBy(): BelongsTo
