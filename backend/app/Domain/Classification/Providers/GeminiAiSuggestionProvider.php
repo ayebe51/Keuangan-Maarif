@@ -26,3 +26,7 @@ class GeminiAiSuggestionProvider implements AiSuggestionInterface
         try {
             return $this->fallbackProvider->suggest($transaction, $context);
         } catch (\Throwable $e) {
+            return $this->fallbackProvider->suggest($transaction, $context);
+        }
+    }
+}
