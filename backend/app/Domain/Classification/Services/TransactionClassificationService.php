@@ -328,3 +328,144 @@ class TransactionClassificationService implements ClassificationRuleEngineInterf
     /**
      * Reject a suggestion.
      */
+    public function rejectSuggestion(ClassificationSuggestion $suggestion, ?User $user = null): void
+    {
+        DB::transaction(function () use ($suggestion, $user) {
+            $orgId = (int) $suggestion->organization_id;
+
+            $suggestion->update([
+                'status' => ClassificationSuggestion::STATUS_REJECTED,
+                'reviewed_by' => $user?->id,
+                'reviewed_at' => now(),
+            ]);
+
+            if ($user) {
+                AuditService::log(
+                    action: 'SUGGESTION_REJECTED',
+                    modelType: ClassificationSuggestion::class,
+                    modelId: $suggestion->id,
+                    newValues: ['status' => 'rejected'],
+                    userId: $user->id,
+                    organizationId: $orgId
+                );
+            }
+        });
+    }
+
+    /**
+     * Manual operator override classification.
+     */
+    public function manualClassify(BankTransaction $transaction, array $data, ?User $user = null): BusinessTransaction
+    {
+        return DB::transaction(function () use ($transaction, $data, $user) {
+            $orgId = (int) $transaction->organization_id;
+
+            $existing = BusinessTransaction::withoutGlobalScopes()
+                ->where('organization_id', $orgId)
+                ->where('bank_transaction_id', $transaction->id)
+                ->first();
+
+            if ($existing && $existing->isPosted()) {
+                throw new ImmutableClassifiedTransactionException("Cannot manually reclassify a posted transaction.");
+            }
+
+            $txType = $data['transaction_type'];
+            $bizType = BusinessTransactionType::tryFrom($txType);
+            if (!$bizType) {
+                throw new InvalidArgumentException("Invalid transaction type '{$txType}'.");
+            }
+
+            $txDir = is_object($transaction->direction) ? $transaction->direction->value : (string) $transaction->direction;
+            if (!$bizType->isDirectionAllowed($txDir)) {
+                throw new InvalidClassificationDirectionException(
+                    "Direction '{$txDir}' is not allowed for transaction type '{$txType}'."
+                );
+            }
+
+            $txDate = is_string($transaction->transaction_date)
+                ? $transaction->transaction_date
+                : $transaction->transaction_date->format('Y-m-d');
+
+            $year = (int) date('Y', strtotime($txDate));
+            $txNumber = $existing ? $existing->transaction_number : BusinessTransaction::generateTransactionNumber($orgId, $year);
+
+            $fiscalPeriod = FiscalPeriod::withoutGlobalScopes()
+                ->where('organization_id', $orgId)
+                ->where('start_date', '<=', $txDate)
+                ->where('end_date', '>=', $txDate)
+                ->first();
+
+            $isPeriodLocked = $fiscalPeriod && $fiscalPeriod->isClosed();
+
+            $bizData = [
+                'organization_id' => $orgId,
+                'transaction_number' => $txNumber,
+                'bank_transaction_id' => $transaction->id,
+                'fiscal_period_id' => $fiscalPeriod ? $fiscalPeriod->id : 1,
+                'transaction_date' => $txDate,
+                'value_date' => $transaction->value_date,
+                'transaction_type' => $txType,
+                'direction' => $txDir,
+                'amount' => $transaction->amount,
+                'counterparty_id' => $data['counterparty_id'] ?? $transaction->counterparty_id,
+                'target_account_id' => $data['target_account_id'] ?? null,
+                'transaction_category_id' => $data['transaction_category_id'] ?? null,
+                'fund_id' => $data['fund_id'] ?? null,
+                'classification_status' => ClassificationStatus::APPROVED,
+                'classification_method' => ClassificationMethod::MANUAL->value,
+                'classification_confidence' => 1.00,
+                'is_period_locked' => $isPeriodLocked,
+                'auto_post_eligible' => !$isPeriodLocked,
+                'description' => $data['description'] ?? $transaction->description ?? 'Manual Classification',
+                'notes' => $data['notes'] ?? 'Manually classified by operator',
+                'status' => 'draft',
+            ];
+
+            if ($existing) {
+                $existing->update($bizData);
+                $bizTx = $existing->fresh();
+            } else {
+                $bizTx = BusinessTransaction::create($bizData);
+            }
+
+            // Sync bank_transaction
+            $transaction->update([
+                'classification_status' => ClassificationStatus::APPROVED,
+                'business_transaction_id' => $bizTx->id,
+            ]);
+
+            // Save as rule if requested
+            if (!empty($data['save_as_rule'])) {
+                $pattern = $data['rule_pattern'] ?? $transaction->description;
+                $this->ruleService->create([
+                    'organization_id' => $orgId,
+                    'name' => "Rule for " . substr($pattern, 0, 50),
+                    'priority' => 100,
+                    'rule_type' => 'KEYWORD',
+                    'direction' => $txDir,
+                    'pattern' => $pattern,
+                    'pattern_type' => 'contains',
+                    'transaction_type' => $txType,
+                    'target_account_id' => $data['target_account_id'] ?? null,
+                    'counterparty_id' => $data['counterparty_id'] ?? $transaction->counterparty_id,
+                    'transaction_category_id' => $data['transaction_category_id'] ?? null,
+                    'auto_post' => true,
+                    'confidence' => 1.00,
+                ], $user);
+            }
+
+            if ($user) {
+                AuditService::log(
+                    action: 'TRANSACTION_MANUALLY_CLASSIFIED',
+                    modelType: BusinessTransaction::class,
+                    modelId: $bizTx->id,
+                    newValues: $bizData,
+                    userId: $user->id,
+                    organizationId: $orgId
+                );
+            }
+
+            return $bizTx;
+        });
+    }
+}
