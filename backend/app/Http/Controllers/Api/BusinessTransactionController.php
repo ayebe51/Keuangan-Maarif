@@ -53,3 +53,10 @@ class BusinessTransactionController extends Controller
     public function show(int $id): JsonResponse
     {
         $tenantId = TenantContext::getTenantId();
+        $transaction = BusinessTransaction::where('organization_id', $tenantId)
+            ->with(['bankTransaction', 'counterparty', 'targetAccount', 'transactionCategory', 'fund', 'suggestions', 'journalEntries'])
+            ->findOrFail($id);
+
+        return response()->json(['data' => $transaction]);
+    }
+}
