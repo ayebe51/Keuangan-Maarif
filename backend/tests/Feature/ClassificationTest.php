@@ -291,3 +291,199 @@ class ClassificationTest extends TestCase
         $this->assertTrue($bizOut->auto_post_eligible);
     }
 
+    /**
+     * Test 6: Golden Gate Kasus MI Darwata Sindangbarang: Kredit Rp852.000 teridentifikasi direction=IN, role=PAYER.
+     */
+    public function test_06_golden_gate_mi_darwata_sindangbarang_credit_852000(): void
+    {
+        $period = FiscalPeriod::where('organization_id', $this->orgA->id)->firstOrFail();
+        DB::table('receivables')->insert([
+            'organization_id' => $this->orgA->id,
+            'fiscal_period_id' => $period->id,
+            'counterparty_id' => $this->cpDarwata->id,
+            'receivable_number' => 'RCV-2026-DARWATA',
+            'receivable_type' => 'school_fee',
+            'due_date' => '2026-03-31',
+            'issue_date' => '2026-03-01',
+            'original_amount' => 852000.00,
+            'outstanding_amount' => 852000.00,
+            'status' => 'outstanding',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $tx = $this->createBankTransaction([
+            'bank_account_id' => $this->account538->id,
+            'direction' => BankTransactionDirection::IN,
+            'amount' => '852000.00',
+            'description' => 'SETORAN DARI MI DARWATA SINDANGBARANG',
+            'counterparty_id' => $this->cpDarwata->id,
+        ]);
+
+        $bizTx = $this->classificationService->classifyTransaction($tx);
+
+        $this->assertEquals('IN', $bizTx->direction);
+        $this->assertEquals('852000.00', $bizTx->amount);
+        $this->assertEquals($this->cpDarwata->id, $bizTx->counterparty_id);
+        $this->assertEquals(Counterparty::ROLE_SCHOOL, $this->cpDarwata->role);
+        $this->assertEquals(BusinessTransactionType::RECEIVABLE_PAYMENT->value, $bizTx->transaction_type);
+        $this->assertEquals(ClassificationStatus::CLASSIFIED, $bizTx->classification_status);
+        $this->assertTrue($bizTx->auto_post_eligible);
+    }
+
+    /**
+     * Test 7: Pencocokan Pola Historis Rekanan (P5) menghasilkan saran (SUGGESTED), bukan auto-post.
+     */
+    public function test_07_historical_heuristic_p5_yields_suggestion_only_no_autopost(): void
+    {
+        $period = FiscalPeriod::where('organization_id', $this->orgA->id)->firstOrFail();
+        $targetAcc = Account::where('organization_id', $this->orgA->id)->where('code', '5100')->firstOrFail();
+
+        // Seed 2 historical approved transactions
+        for ($i = 1; $i <= 2; $i++) {
+            BusinessTransaction::create([
+                'organization_id' => $this->orgA->id,
+                'transaction_number' => "BT-HIST-00{$i}",
+                'fiscal_period_id' => $period->id,
+                'transaction_date' => '2026-02-15',
+                'transaction_type' => BusinessTransactionType::OPERATING_EXPENSE->value,
+                'direction' => 'OUT',
+                'amount' => '500000.00',
+                'counterparty_id' => $this->cpDarwata->id,
+                'target_account_id' => $targetAcc->id,
+                'status' => 'approved',
+                'classification_status' => ClassificationStatus::APPROVED,
+                'description' => 'Honor Pengawas',
+            ]);
+        }
+
+        $tx = $this->createBankTransaction([
+            'direction' => BankTransactionDirection::OUT,
+            'amount' => '500000.00',
+            'counterparty_id' => $this->cpDarwata->id,
+            'description' => 'TRANSAKSI REKANAN TANPA ATURAN DETERMINISTIK',
+        ]);
+
+        $bizTx = $this->classificationService->classifyTransaction($tx);
+
+        $this->assertEquals(ClassificationStatus::SUGGESTED, $bizTx->classification_status);
+        $this->assertEquals(ClassificationMethod::HISTORICAL_RULE->value, $bizTx->classification_method);
+        $this->assertFalse($bizTx->auto_post_eligible); // MUST BE FALSE for Suggestion
+        $this->assertGreaterThanOrEqual(0.70, $bizTx->classification_confidence);
+    }
+
+    /**
+     * Test 8: Pagar Pengaman Saran AI (P6) menghasilkan confidence & evidence, mutlak tidak auto-post.
+     */
+    public function test_08_ai_suggestion_p6_invariant_never_autoposts(): void
+    {
+        $tx = $this->createBankTransaction([
+            'direction' => BankTransactionDirection::OUT,
+            'amount' => '150000.00',
+            'description' => 'PEMBELIAN KONSUMSI DAN SNACK RAPAT PLENO',
+            'counterparty_id' => null,
+        ]);
+
+        $bizTx = $this->classificationService->classifyTransaction($tx);
+
+        $this->assertEquals(ClassificationStatus::SUGGESTED, $bizTx->classification_status);
+        $this->assertEquals(ClassificationMethod::AI_SUGGESTION->value, $bizTx->classification_method);
+        $this->assertFalse($bizTx->auto_post_eligible); // Critical Invariant REV3-10
+        $this->assertGreaterThan(0.70, $bizTx->classification_confidence);
+
+        // Verify suggestion was stored in classification_suggestions
+        $sug = ClassificationSuggestion::where('bank_transaction_id', $tx->id)->first();
+        $this->assertNotNull($sug);
+        $this->assertEquals(ClassificationSuggestion::STATUS_PENDING, $sug->status);
+        $this->assertNotEmpty($sug->evidence);
+    }
+
+    /**
+     * Test 9: Fallback Unclassified (P7) masuk antrean Review Queue dengan alasan transparan.
+     */
+    public function test_09_unclassified_fallback_p7_routes_to_review_queue(): void
+    {
+        $tx = $this->createBankTransaction([
+            'direction' => BankTransactionDirection::IN,
+            'amount' => '999999.00',
+            'description' => 'ZZZZ RANDOM STRING NO KEYWORD 12345XYZ',
+            'counterparty_id' => null,
+        ]);
+
+        $bizTx = $this->classificationService->classifyTransaction($tx);
+
+        $this->assertEquals(ClassificationStatus::UNCLASSIFIED, $bizTx->classification_status);
+        $this->assertFalse($bizTx->auto_post_eligible);
+
+        // Test API queue endpoint
+        Sanctum::actingAs($this->adminA);
+        $res = $this->getJson('/api/v1/transactions/unclassified', ['X-Tenant-Id' => $this->orgA->id]);
+        $res->assertStatus(200);
+        $res->assertJsonFragment(['id' => $tx->id]);
+    }
+
+    /**
+     * Test 10: Deteksi & Pemasangan 2-Leg Transfer Bank Internal (BANK_TRANSFER P&L-Neutral).
+     */
+    public function test_10_internal_bank_transfer_detection_and_pairing(): void
+    {
+        // 1. Source Account 308 (OUT Rp 10.000.000)
+        $txOut = $this->createBankTransaction([
+            'bank_account_id' => $this->account308->id,
+            'direction' => BankTransactionDirection::OUT,
+            'amount' => '10000000.00',
+            'transaction_date' => '2026-03-05',
+            'description' => 'TRF KE REK BRI 538 TABUNGAN LP MAARIF',
+        ]);
+
+        // 2. Destination Account 538 (IN Rp 10.000.000)
+        $txIn = $this->createBankTransaction([
+            'bank_account_id' => $this->account538->id,
+            'direction' => BankTransactionDirection::IN,
+            'amount' => '10000000.00',
+            'transaction_date' => '2026-03-05',
+            'description' => 'TRF DARI REK 308 GIRO LP MAARIF',
+        ]);
+
+        $bizOut = $this->classificationService->classifyTransaction($txOut);
+        $bizIn = $this->classificationService->classifyTransaction($txIn);
+
+        $this->assertEquals(BusinessTransactionType::BANK_TRANSFER->value, $bizOut->transaction_type);
+        $this->assertEquals(BusinessTransactionType::BANK_TRANSFER->value, $bizIn->transaction_type);
+        $this->assertTrue($bizOut->auto_post_eligible);
+        $this->assertTrue($bizIn->auto_post_eligible);
+    }
+
+    /**
+     * Test 11: Proteksi Periode Fiskal Tertutup (Memblokir auto-post untuk transaksi di periode CLOSED).
+     */
+    public function test_11_closed_fiscal_period_protection_blocks_autopost(): void
+    {
+        // Create closed period
+        $closedPeriod = FiscalPeriod::create([
+            'organization_id' => $this->orgA->id,
+            'name' => 'Januari 2026',
+            'code' => '2026-01',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-01-31',
+            'status' => FiscalPeriod::STATUS_CLOSED,
+        ]);
+
+        // Create rule that would otherwise auto-post
+        ClassificationRule::create([
+            'organization_id' => $this->orgA->id,
+            'name' => 'Bunga Bank Rule',
+            'priority' => 10,
+            'direction' => 'IN',
+            'pattern' => 'BUNGA',
+            'transaction_type' => BusinessTransactionType::BANK_INTEREST->value,
+            'auto_post' => true,
+        ]);
+
+        $tx = $this->createBankTransaction([
+            'transaction_date' => '2026-01-15',
+            'direction' => BankTransactionDirection::IN,
+            'amount' => '50000.00',
+            'description' => 'BUNGA REKENING JANUARI',
+        ]);
+
