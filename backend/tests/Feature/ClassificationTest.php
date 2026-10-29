@@ -487,3 +487,143 @@ class ClassificationTest extends TestCase
             'description' => 'BUNGA REKENING JANUARI',
         ]);
 
+        $bizTx = $this->classificationService->classifyTransaction($tx);
+
+        $this->assertTrue($bizTx->is_period_locked);
+        $this->assertFalse($bizTx->auto_post_eligible); // Blocked because period is closed!
+    }
+
+    /**
+     * Test 12: Proteksi Pembayaran Berlebih Piutang (Kelebihan dialokasikan ke UNAPPLIED_CASH, bukan pendapatan).
+     */
+    public function test_12_overpayment_protection_on_receivable_match_routes_excess_to_unapplied(): void
+    {
+        $period = FiscalPeriod::where('organization_id', $this->orgA->id)->firstOrFail();
+        DB::table('receivables')->insert([
+            'organization_id' => $this->orgA->id,
+            'fiscal_period_id' => $period->id,
+            'counterparty_id' => $this->cpDarwata->id,
+            'receivable_number' => 'RCV-OVERPAY-01',
+            'receivable_type' => 'school_fee',
+            'due_date' => '2026-03-31',
+            'issue_date' => '2026-03-01',
+            'original_amount' => 852000.00,
+            'outstanding_amount' => 852000.00,
+            'status' => 'outstanding',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // Transfer is Rp 1.000.000 (> Rp 852.000)
+        $tx = $this->createBankTransaction([
+            'amount' => '1000000.00',
+            'description' => 'SETORAN RCV-OVERPAY-01 DENGAN LEBIH BAYAR',
+        ]);
+
+        $bizTx = $this->classificationService->classifyTransaction($tx);
+
+        $this->assertEquals(ClassificationStatus::SUGGESTED, $bizTx->classification_status);
+        $this->assertFalse($bizTx->auto_post_eligible); // Blocked for manual unapplied cash allocation
+        $this->assertStringContainsString('UNAPPLIED_CASH', $bizTx->notes);
+    }
+
+    /**
+     * Test 13: Validasi Semantik Arah Kas (Pencegahan kas masuk menjadi beban atau kas keluar menjadi pendapatan).
+     */
+    public function test_13_bank_semantics_direction_validation_prevents_misclassification(): void
+    {
+        $this->expectException(InvalidClassificationDirectionException::class);
+
+        // Attempting to create a rule with direction IN but transaction_type OPERATING_EXPENSE must throw!
+        $this->classificationService = app(TransactionClassificationService::class);
+        $ruleService = app(\App\Domain\Classification\Services\ClassificationRuleService::class);
+
+        $ruleService->create([
+            'organization_id' => $this->orgA->id,
+            'name' => 'Illegal Direction Rule',
+            'direction' => 'IN',
+            'transaction_type' => BusinessTransactionType::OPERATING_EXPENSE->value,
+            'pattern' => 'INVALID',
+        ]);
+    }
+
+    /**
+     * Test 14: Klasifikasi Manual dengan Opsi save_as_rule (Membentuk aturan baru secara otomatis).
+     */
+    public function test_14_manual_classification_with_save_as_rule_creates_active_rule(): void
+    {
+        Sanctum::actingAs($this->adminA);
+
+        $tx = $this->createBankTransaction([
+            'direction' => BankTransactionDirection::OUT,
+            'amount' => '350000.00',
+            'description' => 'FOTOCOPY BERKAS UJIAN MAARIF',
+        ]);
+
+        $accExpense = Account::where('organization_id', $this->orgA->id)->where('code', '5100')->firstOrFail();
+
+        $res = $this->postJson("/api/v1/transactions/{$tx->id}/manual-classify", [
+            'transaction_type' => BusinessTransactionType::OPERATING_EXPENSE->value,
+            'target_account_id' => $accExpense->id,
+            'description' => 'Fotocopy Berkas Ujian',
+            'save_as_rule' => true,
+            'rule_pattern' => 'FOTOCOPY BERKAS',
+        ], ['X-Tenant-Id' => $this->orgA->id]);
+
+        $res->assertStatus(200);
+
+        // Verify business transaction was updated
+        $bizTx = BusinessTransaction::where('bank_transaction_id', $tx->id)->firstOrFail();
+        $this->assertEquals(ClassificationStatus::APPROVED, $bizTx->classification_status);
+
+        // Verify new rule was automatically created
+        $rule = ClassificationRule::where('organization_id', $this->orgA->id)
+            ->where('pattern', 'FOTOCOPY BERKAS')
+            ->first();
+
+        $this->assertNotNull($rule);
+        $this->assertEquals(BusinessTransactionType::OPERATING_EXPENSE->value, $rule->transaction_type);
+        $this->assertEquals($accExpense->id, $rule->target_account_id);
+    }
+
+    /**
+     * Test 15: Isolasi Multi-Tenant Mutlak (Aturan dan saran tenant A tidak bocor ke tenant B).
+     */
+    public function test_15_strict_multi_tenant_isolation(): void
+    {
+        // 1. Create rule in Org A
+        $ruleA = ClassificationRule::create([
+            'organization_id' => $this->orgA->id,
+            'name' => 'Rule Khusus Org A',
+            'pattern' => 'TENANT-SPECIFIC-TOKEN',
+            'transaction_type' => BusinessTransactionType::DIRECT_INCOME->value,
+        ]);
+
+        // 2. Org B should not see rule A in index
+        Sanctum::actingAs($this->adminB);
+        $resIndex = $this->getJson('/api/v1/classification-rules', ['X-Tenant-Id' => $this->orgB->id]);
+        $resIndex->assertStatus(200);
+        $resIndex->assertJsonMissing(['id' => $ruleA->id]);
+
+        // 3. Org B should fail to access rule A by ID
+        $resShow = $this->getJson("/api/v1/classification-rules/{$ruleA->id}", ['X-Tenant-Id' => $this->orgB->id]);
+        $resShow->assertStatus(404);
+
+        // 4. Transaction in Org B matching Rule A's pattern should NOT match Rule A
+        $txB = BankTransaction::create([
+            'organization_id' => $this->orgB->id,
+            'bank_account_id' => $this->account538->id,
+            'transaction_date' => '2026-03-10',
+            'direction' => BankTransactionDirection::IN,
+            'amount' => '100000.00',
+            'description' => 'TENANT-SPECIFIC-TOKEN IN ORG B',
+            'fingerprint' => hash('sha256', uniqid('fp_b_', true)),
+            'status' => BankTransactionStatus::UNMATCHED,
+            'classification_status' => ClassificationStatus::UNCLASSIFIED,
+        ]);
+
+        $matchB = $this->classificationService->evaluate($txB);
+        // Should not match Rule A (since rule A belongs to Org A)
+        $this->assertNotEquals(ClassificationMethod::DETERMINISTIC_RULE, $matchB->method);
+    }
+}
