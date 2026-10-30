@@ -251,3 +251,70 @@ backend/app/
 4. **`DeterministicRuleMatcher` (Priority 4 - Auto-Post: YES)**:
    Mengevaluasi tabel `classification_rules` berdasarkan prioritas terendah lebih dulu (`ORDER BY priority ASC`), arah kas, limit nominal, dan pencocokan teks (`contains`, `regex`, `starts_with`).
 5. **`HistoricalHeuristicMatcher` (Priority 5 - Suggestion Only: NO AUTO-POST)**:
+   Menganalisis riwayat transaksi bank berulang pada rekanan yang sama untuk menghasilkan rekomendasi berstatus `SUGGESTED` (confidence 0.70 – 0.85).
+6. **`AiSuggestionService` & Providers (Priority 6 - Suggestion Only: NEVER AUTO-POST)**:
+   - `HeuristicAiSuggestionProvider`: Provider deterministik lokal untuk lingkungan test/CI tanpa ketergantungan API eksternal.
+   - `GeminiAiSuggestionProvider`: Provider produksi untuk model LLM.
+   - Keduanya wajib menghasilkan rekomendasi berstatus `SUGGESTED` dengan *evidence reasoning*, **mutlak tidak pernah auto-post**.
+7. **`TransferDetectionService` (Rulebook R07)**:
+   Mendeteksi mutasi internal antar 3 rekening bank LP Ma'arif (`Giro 308`, `Giro 304`, `Tabungan 538`) berdasarkan kata kunci transfer dan nomor rekening tujuan/asal, lalu memasangkan leg OUT dan leg IN.
+8. **Unclassified Fallback (Priority 7 - Review Queue)**:
+   Menandai transaksi sebagai `UNCLASSIFIED` dengan alasan diagnostik transparan untuk antrean peninjauan operator.
+
+### Step 6.4: Master Pipeline Orchestrator (`TransactionClassificationService`)
+1. Menerima mutasi `BankTransaction` (single atau batch).
+2. Melakukan *preloading* data pendukung (aturan aktif, rekanan, pemetaan kode, periode fiskal) untuk mencegah masalah N+1 Query pada impor massal.
+3. Menjalankan alur pencocokan berurutan dari Priority 1 hingga Priority 7.
+4. Mengecek status periode fiskal: jika periode berstatus `CLOSED`, transaksi ditandai `is_period_locked = true` dan dialirkan ke antrean peninjauan (*no auto-post*).
+5. Membuat/memperbarui entitas `BusinessTransaction` dan `ClassificationSuggestion`.
+6. Sinkronisasi status `classification_status` pada baris `BankTransaction`.
+7. Mencatat log ke `AuditService`.
+
+### Step 6.5: HTTP API Layer
+1. `ClassificationRuleController`:
+   - `GET /api/v1/classification-rules` (List aturan aktif terurut prioritas).
+   - `POST /api/v1/classification-rules` (Tambah aturan baru).
+   - `GET /api/v1/classification-rules/{id}` (Detail aturan).
+   - `PUT /api/v1/classification-rules/{id}` (Update aturan).
+   - `DELETE /api/v1/classification-rules/{id}` (Hapus aturan).
+2. `TransactionClassificationController`:
+   - `POST /api/v1/transactions/classify-batch` (Trigger klasifikasi massal untuk batch import bank).
+   - `POST /api/v1/transactions/{id}/classify` (Klasifikasi ulang transaksi tunggal).
+   - `GET /api/v1/transactions/unclassified` (Antrean transaksi belum terklasifikasi).
+   - `GET /api/v1/transactions/suggestions` (Antrean saran AI/heuristik yang butuh persetujuan).
+   - `POST /api/v1/transactions/{id}/apply-suggestion` (Menerima rekomendasi saran).
+   - `POST /api/v1/transactions/{id}/reject-suggestion` (Menolak rekomendasi saran).
+   - `POST /api/v1/transactions/{id}/manual-classify` (Klasifikasi manual dengan opsi `save_as_rule`).
+3. `BusinessTransactionController`:
+   - `GET /api/v1/business-transactions` (Daftar transaksi bisnis ternormalisasi).
+   - `GET /api/v1/business-transactions/{id}` (Detail transaksi bisnis beserta rujukan mutasi bank).
+
+### Step 6.6: Automated Test Suite (15 Comprehensive Scenarios)
+Pengujian mendalam melalui `backend/tests/Feature/ClassificationTest.php`:
+- **Test 1:** Evaluasi hierarki 7 presedensi berjalan kaku sesuai urutan prioritas (P1 $\rightarrow$ P7).
+- **Test 2:** Pencocokan Pemetaan Eksplisit Pengguna (P1) menghasilkan auto-post eligible.
+- **Test 3:** Pencocokan Nomor Invoice/Referensi (P2) mencocokkan piutang madrasah secara tepat.
+- **Test 4:** Pencocokan Kode Warisan (P3) mengekstrak kode legacy (misal `1314`) dan mengarahkan ke akun kanonikal.
+- **Test 5:** Aturan Kategori Deterministik (P4) mengklasifikasikan bunga bank (`BANK_INTEREST`) dan biaya admin bank (`BANK_FEE_TAX`).
+- **Test 6:** **Golden Gate Kasus MI Darwata Sindangbarang**: Mutasi Kredit Rp852.000 teridentifikasi `direction=IN`, `role=PAYER`, dan terklasifikasi ke madrasah terkait.
+- **Test 7:** Pencocokan Pola Historis Rekanan (P5) menghasilkan saran (`SUGGESTED`), **bukan auto-post**.
+- **Test 8:** Pagar Pengaman Saran AI (P6) menghasilkan `confidence` & `evidence`, **mutlak tidak auto-post**.
+- **Test 9:** Fallback Unclassified (P7) masuk antrean Review Queue dengan alasan transparan.
+- **Test 10:** Deteksi & Pemasangan 2-Leg Transfer Bank Internal (`BANK_TRANSFER` P&L-Neutral).
+- **Test 11:** Proteksi Periode Fiskal Tertutup (Memblokir auto-post untuk transaksi di periode `CLOSED`).
+- **Test 12:** Proteksi Pembayaran Berlebih Piutang (Kelebihan dialokasikan ke `UNAPPLIED_CASH`, bukan pendapatan).
+- **Test 13:** Validasi Semantik Arah Kas (Pencegahan kas masuk menjadi beban atau kas keluar menjadi pendapatan).
+- **Test 14:** Klasifikasi Manual dengan Opsi `save_as_rule` (Membentuk aturan baru secara otomatis).
+- **Test 15:** Isolasi Multi-Tenant Mutlak (Aturan dan saran tenant A tidak bocor ke tenant B).
+
+---
+
+## 6. Kriteria Kelulusan Phase Gate 6 (Acceptance Criteria)
+
+Phase 6 dinyatakan selesai dan lulus jika seluruh kriteria berikut terpenuhi:
+1. Seluruh 15 skenario pengujian baru pada `ClassificationTest.php` lulus 100% tanpa kegagalan (`zero failures`).
+2. Seluruh 83 pengujian eksisting (Phase 1–5) tetap lulus tanpa regresi (total $\ge$ 98 tests).
+3. Kasus uji spesifikasi wajib `MI Darwata Sindangbarang Kredit Rp852.000` diverifikasi lulus dengan arah `IN` dan peran rekanan `PAYER`.
+4. Invarian `AI Suggestion Safety` terbukti secara otomatis: tidak ada transaksi dari saran AI yang langsung berstatus `POSTED` tanpa verifikasi operator.
+5. Invarian `Bank Transfer Pairing` dan `Closed Period Protection` terbukti berjalan dengan benar.
+6. Invarian `Multi-Tenant Isolation` terbukti tidak tembus lintas tenant.
