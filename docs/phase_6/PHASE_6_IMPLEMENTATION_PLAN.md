@@ -55,3 +55,199 @@ Modul ini **bukan sekadar penanda kategori teks biasa**, melainkan benteng perta
 
 ---
 
+## 2. Invariants & Aturan Bisnis Kritis Phase 6
+
+1. **INVARIANT: Hierarki Presedensi 7 Tingkat Tidak Boleh Dilanggar (REV3-07)**  
+   Urutan evaluasi kaku:
+   - Priority 1: Explicit User Mapping $\implies$ Auto-Post: YES
+   - Priority 2: Exact Invoice / Reference Match $\implies$ Auto-Post: YES
+   - Priority 3: Approved Legacy Code Mapping $\implies$ Auto-Post: YES
+   - Priority 4: Deterministic Category/Text Rules $\implies$ Auto-Post: YES
+   - Priority 5: Counterparty + Historical Pattern $\implies$ Suggestion Only: NO AUTO-POST
+   - Priority 6: AI / Fuzzy Suggestion Engine $\implies$ Suggestion Only: NEVER AUTO-POST
+   - Priority 7: Unclassified Fallback $\implies$ Review Queue: NO AUTO-POST
+
+2. **INVARIANT: Pagar Pengaman AI & Heuristik (REV3-10, Rulebook R13)**  
+   Hasil dari AI dan heuristik (P5 & P6) hanya menghasilkan status `SUGGESTED` dengan skor kepercayaan (*confidence score* 0.00 – 1.00) dan teks bukti (*evidence string*). Hanya manusia (Accounting Operator/Admin) yang dapat mengonfirmasi saran menjadi transaksi valid.
+
+3. **INVARIANT: Konsistensi Arah Arus Kas Terhadap Akun (Rulebook R01 & R02)**  
+   - Mutasi `IN` (Kredit Bank) dilarang dikaitkan dengan akun berkepala 5xxx (Beban) sebagai penambah beban.
+   - Mutasi `OUT` (Debet Bank) dilarang dikaitkan dengan akun berkepala 4xxx (Pendapatan) sebagai penambah pendapatan.
+   Pelanggaran melempar `InvalidClassificationDirectionException`.
+
+4. **INVARIANT: Deteksi Transfer Internal P&L-Neutral (Rulebook R07)**  
+   Transaksi antar-rekening internal LP Ma'arif tidak boleh diakui sebagai beban atau pendapatan. Sistem mendeteksi nomor rekening internal dan kata kunci transfer untuk menandai tipe transaksi sebagai `BANK_TRANSFER`.
+
+5. **INVARIANT: Proteksi Immutabilitas Pasca-Posting (Rulebook R09)**  
+   Jika sebuah `BusinessTransaction` telah berstatus `POSTED` (sudah menghasilkan jurnal akuntansi pada Phase 7), pengklasifikasian ulang dilarang keras dan memicu `ImmutableClassifiedTransactionException` (HTTP 409). Koreksi wajib melalui alur jurnal pembalik (*reversal*).
+
+6. **INVARIANT: Proteksi Periode Fiskal Tertutup (Rulebook R11)**  
+   Transaksi dengan tanggal mutasi pada periode fiskal `CLOSED` tidak boleh diposting otomatis. Transaksi dialirkan ke antrean peninjauan dengan kode `PERIOD_LOCKED`.
+
+7. **INVARIANT: Proteksi Pembayaran Berlebih (Rulebook R05, REV3-11)**  
+   Pembayaran piutang yang melebihi nilai saldo piutang outstanding tidak boleh diakui otomatis sebagai pendapatan. Selisih lebih wajib dicatat sebagai `UNAPPLIED_CASH`.
+
+8. **INVARIANT: Isolasi Multi-Tenant Ketat (Tenant Boundary Isolation)**  
+   Setiap tabel (`classification_rules`, `business_transactions`, `classification_suggestions`) wajib memiliki kolom `organization_id` yang *NOT NULL*, menerapkan relasi `BelongsToTenant`, dan terproteksi dari kebocoran data antar-organisasi.
+
+---
+
+## 3. Matriks Taksonomi Transaksi Bisnis (Transaction Taxonomy Matrix)
+
+Berdasarkan *Transaction Rulebook* REV3-24, 8 tipe transaksi bisnis resmi yang dikelola adalah:
+
+| No | Tipe Transaksi (`transaction_type`) | Arah Bank | Indikator Utama | Akun Debit Standar | Akun Kredit Standar | Status Auto-Post |
+| :--- | :--- | :---: | :--- | :--- | :--- | :---: |
+| 1 | `RECEIVABLE_PAYMENT` | `IN` | Cocok dengan Piutang/Madrasah | 110x (Kas/Bank) | 131x (Piutang) | ✅ Eligible |
+| 2 | `DIRECT_INCOME` | `IN` | Pendapatan langsung tanpa piutang | 110x (Kas/Bank) | 41xx (Pendapatan) | ✅ Eligible |
+| 3 | `BANK_INTEREST` | `IN` | Counterparty = BANK (Bunga) | 110x (Kas/Bank) | 4116 (Pendapatan Bunga) | ✅ Eligible |
+| 4 | `BANK_FEE_TAX` | `OUT` | Counterparty = BANK (Admin/Pajak) | 5116 (Beban Admin/Pajak) | 110x (Kas/Bank) | ✅ Eligible |
+| 5 | `OPERATING_EXPENSE` | `OUT` | Beban operasional umum/kantor | 5xxx (Beban Operasional) | 110x (Kas/Bank) | ✅ Eligible |
+| 6 | `ALLOCATION_DISBURSEMENT` | `OUT` | Terkait Program/Fund (21xx/22xx) | 21xx/22xx (Alokasi Dana) | 110x (Kas/Bank) | ✅ Eligible |
+| 7 | `BANK_TRANSFER` | `IN` / `OUT` | Mutasi antar-rekening internal LP | 110x (Bank Tujuan) | 110x (Bank Asal) | ✅ Eligible |
+| 8 | `CASH_TRANSACTION` | `IN` / `OUT` | Mutasi Buku Kas Tunai (1101) | Sesuai Uraian | Sesuai Uraian | ✅ Eligible |
+
+---
+
+## 4. Desain Arsitektur & Bounded Context (Domain/Classification)
+
+```text
+backend/app/
+├── Domain/
+│   ├── Classification/
+│   │   ├── Contracts/
+│   │   │   ├── ClassificationRuleEngineInterface.php
+│   │   │   ├── AiSuggestionInterface.php
+│   │   │   └── LegacyCodeResolverInterface.php
+│   │   ├── DTOs/
+│   │   │   ├── ClassificationMatchResult.php
+│   │   │   └── AiSuggestionResult.php
+│   │   ├── Enums/
+│   │   │   ├── ClassificationMethod.php       # EXPLICIT_MAPPING, INVOICE_REFERENCE, LEGACY_CODE, DETERMINISTIC_RULE, HISTORICAL_RULE, AI_SUGGESTION, MANUAL
+│   │   │   ├── ClassificationStatus.php       # UNCLASSIFIED, SUGGESTED, CLASSIFIED, REVIEWED, APPROVED, REJECTED
+│   │   │   ├── ClassificationRuleType.php     # DETERMINISTIC, KEYWORD, REGEX, EXACT_REFERENCE, COUNTERPARTY
+│   │   │   └── BusinessTransactionType.php    # RECEIVABLE_PAYMENT, DIRECT_INCOME, BANK_INTEREST, BANK_FEE_TAX, OPERATING_EXPENSE, ALLOCATION_DISBURSEMENT, BANK_TRANSFER, CASH_TRANSACTION
+│   │   ├── Exceptions/
+│   │   │   ├── InvalidClassificationDirectionException.php
+│   │   │   ├── ConflictingRuleException.php
+│   │   │   └── ImmutableClassifiedTransactionException.php
+│   │   ├── Matchers/
+│   │   │   ├── ExplicitMappingMatcher.php      # Priority 1
+│   │   │   ├── InvoiceReferenceMatcher.php     # Priority 2
+│   │   │   ├── LegacyCodeMatcher.php           # Priority 3
+│   │   │   ├── DeterministicRuleMatcher.php    # Priority 4
+│   │   │   └── HistoricalHeuristicMatcher.php  # Priority 5
+│   │   ├── Models/
+│   │   │   ├── BusinessTransaction.php         # Model transaksi bisnis perantara ke jurnal
+│   │   │   ├── ClassificationRule.php          # Master aturan klasifikasi deklaratif
+│   │   │   ├── ClassificationSuggestion.php    # Wadah saran klasifikasi AI/Heuristic
+│   │   │   └── TransactionCategory.php         # (Existing Phase 4)
+│   │   ├── Providers/
+│   │   │   ├── HeuristicAiSuggestionProvider.php # Provider lokal/offline deterministik untuk test/CI
+│   │   │   └── GeminiAiSuggestionProvider.php   # Provider produksi terhubung LLM eksternal
+│   │   └── Services/
+│   │       ├── ClassificationRuleService.php
+│   │       ├── TransactionClassificationService.php # Master Pipeline Orchestrator (Batch & Single)
+│   │       ├── TransferDetectionService.php    # Deteksi & Pemasangan 2-Leg Transfer Bank
+│   │       ├── AiSuggestionService.php          # Wrapper & Resolver Provider AI
+│   │       └── TransactionCategoryService.php   # (Existing Phase 4)
+│   └── Bank/
+│       └── Models/BankTransaction.php           # (Sinkronisasi status klasifikasi & relasi ke BusinessTransaction)
+├── Http/
+│   ├── Controllers/Api/
+│   │   ├── ClassificationRuleController.php
+│   │   ├── TransactionClassificationController.php
+│   │   └── BusinessTransactionController.php
+│   └── Requests/
+│       ├── StoreClassificationRuleRequest.php
+│       ├── ApplyClassificationSuggestionRequest.php
+│       └── ManualClassifyTransactionRequest.php
+```
+
+---
+
+## 5. Rencana Langkah Kerja Eksekusi (Step-by-Step Execution Plan)
+
+### Step 6.1: Database Schema & Migrations
+1. **Migration 1:** `create_classification_rules_table`:
+   - `id`, `organization_id` (FK), `name`, `priority` (integer default 100), `is_active` (boolean default true).
+   - `rule_type` (`KEYWORD`, `REGEX`, `EXACT_REFERENCE`, `COUNTERPARTY`).
+   - `direction` (nullable string: `IN`, `OUT`, `TRANSFER`).
+   - `bank_account_id` (nullable FK ke `bank_accounts`).
+   - `pattern` (string pencocokan teks), `pattern_type` (`contains`, `exact`, `regex`, `starts_with`, `ends_with`).
+   - `min_amount`, `max_amount` (nullable `DECIMAL(18,2)`).
+   - `transaction_type` (string).
+   - `transaction_category_id` (nullable FK ke `transaction_categories`).
+   - `target_account_id` (nullable FK ke `accounts`).
+   - `counterparty_id` (nullable FK ke `counterparties`).
+   - `fund_id` (nullable FK ke `funds`).
+   - `auto_post` (boolean default true).
+   - `confidence` (decimal 4,2 default 1.00).
+   - `description` (text nullable).
+   - Index: `(organization_id, is_active, priority)`, `(organization_id, direction)`.
+
+2. **Migration 2:** `create_business_transactions_table`:
+   - `id`, `organization_id` (FK), `transaction_number` (string unik per org, misal `BT-2026-00001`).
+   - `bank_transaction_id` (nullable FK ke `bank_transactions`).
+   - `fiscal_period_id` (FK ke `fiscal_periods`).
+   - `transaction_date` (date), `value_date` (date nullable).
+   - `transaction_type` (string), `direction` (string: `IN`, `OUT`, `TRANSFER`).
+   - `amount` (`DECIMAL(18,2)`), `counterparty_id` (nullable FK).
+   - `target_account_id` (nullable FK ke `accounts`).
+   - `transaction_category_id` (nullable FK ke `transaction_categories`).
+   - `fund_id` (nullable FK ke `funds`).
+   - `paired_business_transaction_id` (nullable FK untuk 2-leg transfer).
+   - `classification_status` (`unclassified`, `suggested`, `classified`, `reviewed`, `approved`, `rejected`).
+   - `classification_method` (nullable string), `classification_confidence` (nullable decimal 4,2).
+   - `is_period_locked` (boolean default false).
+   - `description` (text), `notes` (text nullable), `status` (string default `'draft'`: `draft`, `approved`, `posted`, `rejected`).
+   - Unique: `(organization_id, transaction_number)`.
+   - Index: `(organization_id, bank_transaction_id)`, `(organization_id, classification_status)`.
+
+3. **Migration 3:** `create_classification_suggestions_table`:
+   - `id`, `organization_id` (FK), `bank_transaction_id` (FK), `business_transaction_id` (nullable FK).
+   - `suggested_type` (string), `suggested_account_id` (nullable FK ke `accounts`).
+   - `suggested_category_id` (nullable FK ke `transaction_categories`).
+   - `suggested_counterparty_id` (nullable FK ke `counterparties`).
+   - `confidence` (`DECIMAL(4,2)`), `evidence` (text), `explanation` (text), `metadata` (json nullable).
+   - `status` (string default `'pending'`: `pending`, `accepted`, `rejected`).
+   - `reviewed_by` (nullable FK ke `users`), `reviewed_at` (timestamp nullable).
+   - Index: `(organization_id, bank_transaction_id)`, `(organization_id, status)`.
+
+4. **Migration 4:** `add_classification_status_and_links_to_existing_tables`:
+   - Menambahkan kolom `classification_status` (string default `'unclassified'`) dan `business_transaction_id` (nullable FK ke `business_transactions`) pada tabel `bank_transactions`.
+   - Menambahkan nullable FK `business_transaction_id` pada tabel `journal_entries` sesuai `ERD_REVISED.md`.
+
+### Step 6.2: Domain Models, Enums, DTOs & Contracts
+1. **Enums:**
+   - `ClassificationMethod`
+   - `ClassificationStatus`
+   - `ClassificationRuleType`
+   - `BusinessTransactionType`
+2. **DTOs:**
+   - `ClassificationMatchResult`: Objek immutable hasil evaluasi (`isMatched`, `priority`, `method`, `confidence`, `type`, `accountId`, `categoryId`, `counterpartyId`, `fundId`, `autoPost`, `evidence`, `explanation`).
+   - `AiSuggestionResult`: Objek saran AI dengan evidence, reasoning, dan alternatif akun.
+3. **Contracts:**
+   - `ClassificationRuleEngineInterface`: Kontrak evaluasi transaksi bank.
+   - `AiSuggestionInterface`: Kontrak pembuatan saran cerdas.
+   - `LegacyCodeResolverInterface`: Kontrak resolusi kode akun warisan.
+4. **Exceptions:**
+   - `InvalidClassificationDirectionException` (HTTP 422: Arah mutasi bertentangan dengan saldo normal/akun).
+   - `ImmutableClassifiedTransactionException` (HTTP 409: Penolakan ubah transaksi posted).
+5. **Models:**
+   - `ClassificationRule`: Eloquent model dengan tenant scoping, helper evaluasi pola teks/nominal.
+   - `BusinessTransaction`: Model perantara transaksi bisnis dengan auto-numbering `BT-YYYY-XXXXX`, proteksi immutabilitas, dan relasi ke `BankTransaction` serta `ClassificationSuggestion`.
+   - `ClassificationSuggestion`: Model wadah penampung saran AI/heuristik dengan pelacakan status review.
+
+### Step 6.3: Rules Matchers & Engine Services
+1. **`ExplicitMappingMatcher` (Priority 1 - Auto-Post: YES)**:
+   Mengecek pemetaan manual eksplisit pengguna yang tersimpan sebelumnya untuk pola mutasi tertentu.
+2. **`InvoiceReferenceMatcher` (Priority 2 - Auto-Post: YES)**:
+   Mengekstrak nomor referensi/tagihan madrasah dari uraian transaksi dan mencocokkannya ke piutang outstanding (`receivables`).
+   - Jika nilai pembayaran tepat $\implies$ `RECEIVABLE_PAYMENT`.
+   - Jika pembayaran berlebih $\implies$ pisahkan kelebihan sebagai `UNAPPLIED_CASH` (Invarian R05).
+3. **`LegacyCodeMatcher` (Priority 3 - Auto-Post: YES)**:
+   Mengekstrak kode warisan (misal `1314`, `4116`, `5116`) dari deskripsi transaksi atau kolom legacy, lalu menyelaraskannya melalui `AccountMapping::where('mapping_type', 'legacy_code')`.
+4. **`DeterministicRuleMatcher` (Priority 4 - Auto-Post: YES)**:
+   Mengevaluasi tabel `classification_rules` berdasarkan prioritas terendah lebih dulu (`ORDER BY priority ASC`), arah kas, limit nominal, dan pencocokan teks (`contains`, `regex`, `starts_with`).
+5. **`HistoricalHeuristicMatcher` (Priority 5 - Suggestion Only: NO AUTO-POST)**:
