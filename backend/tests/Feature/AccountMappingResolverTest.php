@@ -238,3 +238,101 @@ class AccountMappingResolverTest extends TestCase
 
     public function test_bank_fee_account_resolution(): void
     {
+        $account = $this->resolver->resolveBankFeeAccount($this->orgA->id);
+
+        $this->assertSame('5200', $account->code);
+        $this->assertSame(Account::TYPE_EXPENSE, $account->account_type);
+        $this->assertSame(Account::BALANCE_DEBIT, $account->normal_balance);
+    }
+
+    public function test_bank_tax_account_resolution(): void
+    {
+        $account = $this->resolver->resolveBankTaxAccount($this->orgA->id);
+
+        $this->assertSame('5300', $account->code);
+        $this->assertSame(Account::TYPE_EXPENSE, $account->account_type);
+        $this->assertSame(Account::BALANCE_DEBIT, $account->normal_balance);
+    }
+
+    public function test_operating_expense_account_resolution(): void
+    {
+        $account = $this->resolver->resolveOperatingExpenseAccount($this->orgA->id);
+
+        $this->assertSame('5100', $account->code);
+        $this->assertSame(Account::TYPE_EXPENSE, $account->account_type);
+        $this->assertSame(Account::BALANCE_DEBIT, $account->normal_balance);
+    }
+
+    public function test_fund_allocation_account_resolution(): void
+    {
+        $fund = Fund::where('organization_id', $this->orgA->id)->where('code', 'DANA-ABADI')->firstOrFail();
+
+        $account = $this->resolver->resolveFundAllocationAccount($fund, $this->orgA->id);
+
+        $this->assertInstanceOf(Account::class, $account);
+        $this->assertSame(Account::TYPE_LIABILITY, $account->account_type);
+        $this->assertSame(Account::BALANCE_CREDIT, $account->normal_balance);
+    }
+
+    public function test_inactive_fund_rejected(): void
+    {
+        $inactiveFund = Fund::create([
+            'organization_id' => $this->orgA->id,
+            'code' => 'DANA-INACTIVE',
+            'name' => 'Dana Tidak Aktif',
+            'fund_type' => Fund::TYPE_RESTRICTED,
+            'is_active' => false,
+            'status' => Fund::STATUS_CANCELLED,
+        ]);
+
+        $this->expectException(InvalidFundAccountMappingException::class);
+        $this->resolver->resolveFundAllocationAccount($inactiveFund, $this->orgA->id);
+    }
+
+    public function test_unapplied_cash_account_resolution(): void
+    {
+        $account = $this->resolver->resolveUnappliedCashAccount($this->orgA->id);
+
+        $this->assertSame('2200', $account->code);
+        $this->assertSame(Account::TYPE_LIABILITY, $account->account_type);
+        $this->assertSame(Account::BALANCE_CREDIT, $account->normal_balance);
+    }
+
+    public function test_master_resolve_orchestration_for_direct_income(): void
+    {
+        $resolved = $this->resolver->resolve(PostingCategory::DIRECT_INCOME, $this->orgA->id, [
+            'bank_account' => $this->bankGiro308,
+        ]);
+
+        $this->assertSame('1120', $resolved->getDebitAccount()->code);
+        $this->assertSame('4100', $resolved->getCreditAccount()->code);
+    }
+
+    public function test_master_resolve_orchestration_for_bank_transfer(): void
+    {
+        $resolved = $this->resolver->resolve(PostingCategory::BANK_TRANSFER, $this->orgA->id, [
+            'source_bank_account' => $this->bankGiro308,
+            'destination_bank_account' => $this->bankGiro304,
+        ]);
+
+        $this->assertSame('1130', $resolved->getDebitAccount()->code); // Destination debited
+        $this->assertSame('1120', $resolved->getCreditAccount()->code); // Source credited
+    }
+
+    public function test_master_resolve_orchestration_for_bank_fee_tax(): void
+    {
+        $resolvedFee = $this->resolver->resolve(PostingCategory::BANK_FEE_TAX, $this->orgA->id, [
+            'bank_account' => $this->bankGiro308,
+            'subtype' => 'ADMIN_FEE',
+        ]);
+        $this->assertSame('5200', $resolvedFee->getDebitAccount()->code); // Beban Adm Bank
+        $this->assertSame('1120', $resolvedFee->getCreditAccount()->code); // Bank credited
+
+        $resolvedTax = $this->resolver->resolve(PostingCategory::BANK_FEE_TAX, $this->orgA->id, [
+            'bank_account' => $this->bankGiro308,
+            'subtype' => 'TAX',
+        ]);
+        $this->assertSame('5300', $resolvedTax->getDebitAccount()->code); // Beban Pajak Bunga Bank
+        $this->assertSame('1120', $resolvedTax->getCreditAccount()->code); // Bank credited
+    }
+}
