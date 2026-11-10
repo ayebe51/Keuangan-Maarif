@@ -258,3 +258,189 @@ ADD COLUMN posted_journal_entry_id BIGINT REFERENCES journal_entries(id) ON DELE
 
 ---
 
+## 11. ATOMIC TRANSACTION & IDEMPOTENCY
+
+### 11.1. Row Locking & Concurrency Protection
+Saat transaksi diproses, generator menjalankan:
+```php
+$tx = BusinessTransaction::withoutGlobalScopes()
+    ->where('id', $transaction->id)
+    ->lockForUpdate()
+    ->firstOrFail();
+```
+Pada PostgreSQL, `lockForUpdate()` mengambil *exclusive row-level lock*, memastikan pekerja kedua (*worker 2*) yang mencoba memproses transaksi yang sama akan menunggu hingga worker 1 selesai.
+
+### 11.2. Idempotent Return
+Setelah kunci diperoleh, generator memeriksa keberadaan link pada `journal_entry_sources`:
+- Jika ditemukan draf jurnal aktif, generator langsung mengembalikan draf tersebut:
+  `return $existingDraft->fresh(['lines', 'sources']);`
+- Tidak ada draf jurnal ganda yang pernah diterbitkan.
+
+### 11.3. Atomic Rollback
+Jika terjadi kesalahan pada tahapan apa pun (validasi COA gagal, akun non-aktif, atau koneksi terputus), seluruh operasi dibatalkan secara atomik. Tidak ada header jurnal yatim piatu (*orphaned headers*) atau baris jurnal tak bertuan (*dangling lines*).
+
+---
+
+## 12. MULTI-LINE JOURNAL VERIFICATION
+
+Kemampuan pembuatan jurnal multi-line diuji pada skenario kelebihan bayar piutang madrasah (*overpayment*):
+- Total penerimaan di bank: **Rp1.000.000,00**
+- Pokok piutang teridentifikasi: **Rp852.000,00** (COA `1210`)
+- Kelebihan bayar (titipan kas): **Rp148.000,00** (COA `2200`)
+
+Hasil draf jurnal yang terbentuk:
+
+| Baris | Akun COA | Nama Akun | Debit (Rp) | Kredit (Rp) | Dimensi |
+| :---: | :---: | :--- | :---: | :---: | :--- |
+| **1** | `1120` | Bank BRI Giro 308 | 1.000.000,00 | 0,00 | `bank_account_id: 1` |
+| **2** | `1210` | Piutang Madrasah | 0,00 | 852.000,00 | `counterparty_id: MI Darwata` |
+| **3** | `2200` | Unapplied Cash / Titipan | 0,00 | 148.000,00 | `counterparty_id: MI Darwata` |
+| **TOTAL** | | | **1.000.000,00** | **1.000.000,00** | **BALANCED** |
+
+---
+
+## 13. TENANT ISOLATION
+
+1. **Server-Side Validation:** `JournalDraftGenerator` memeriksa kecocokan `organization_id` transaksi dengan `TenantContext::getTenantId()`. Transaksi dari tenant lain langsung ditolak dengan `CrossTenantViolationException`.
+2. **Account Ownership:** Seluruh akun hasil resolusi divalidasi kepemilikannya oleh `AccountMappingResolver` dan diperiksa ulang oleh `JournalPostingService`.
+3. **Database Scoping:** Seluruh query ke `journal_entry_sources` dan `journal_entries` menyertakan kolom `organization_id`.
+
+---
+
+## 14. SECURITY & AUDIT PROVENANCE
+
+1. **Maker Identity Integrity:** `created_by` pada draf jurnal dicatat berdasarkan identitas pengguna autentik pembuat transaksi (`$maker->id`), bukan akun sistem palsu (*no spoofed identities*).
+2. **Audit Logging:** Setiap penciptaan draf dicatat secara otomatis oleh `AuditService::log('JOURNAL_DRAFT_CREATED', ...)` lengkap dengan IP, user agent, dan correlation ID.
+3. **Maker-Checker Boundary Preserved:** Karena status jurnal tetap `DRAFT`, SoD tidak dilewati. Checker independen tetap diwajibkan untuk memeriksa dan mem-posting jurnal di Phase 7.3.
+
+---
+
+## 15. SQLITE & POSTGRESQL TEST RESULTS
+
+### 15.1. SQLite Fast In-Memory Suite
+Pengujian unit dan feature berjalan cepat dan bersih pada SQLite in-memory:
+- `JournalDraftDTOTest`: 10 passed, 18 assertions.
+- `JournalDraftGeneratorTest`: 10 passed, 49 assertions.
+- `JournalSourceDatabaseTest`: 4 passed, 7 assertions.
+
+### 15.2. PostgreSQL 16.11 Real Database Integration Suite
+Pengujian integrasi dijalankan langsung terhadap instance PostgreSQL server aktif (`maarif_keuangan`):
+- `test_postgresql_ddl_and_check_constraints_exist`: **PASS** (Memvalidasi 5 constraint database PostgreSQL).
+- `test_postgresql_check_constraint_rejects_invalid_leg_role`: **PASS** (Menolak nilai `leg_role` di luar whitelist).
+- `test_postgresql_unique_source_constraint_enforced`: **PASS** (Menolak duplikasi pasangan `organization_id`, `source_type`, `source_id`).
+- `test_postgresql_row_locking_and_rollback`: **PASS** (Memvalidasi pembatalan atomik dan row lock).
+
+---
+
+## 16. FULL REGRESSION RESULTS
+
+```text
+PHPUnit 12.5.33 by Sebastian Bergmann and contributors.
+Runtime: PHP 8.3.29
+Configuration: D:\apss-source\Keuangan maarif\backend\phpunit.xml
+Time: 00:30.737, Memory: 70.00 MB
+
+OK (177 tests, 607 assertions)
+```
+
+| Kelompok Pengujian | Tests | Assertions | Status |
+| :--- | :---: | :---: | :---: |
+| **Phase 1–6 Historical Baseline** | 98 | 352 | **PASS** |
+| **Phase 7.1 Posting Matrix & Resolution** | 51 | 171 | **PASS** |
+| **Phase 7.2 Draft Generator & PostgreSQL Integration** | 28 | 84 | **PASS** |
+| **TOTAL TEST SUITE REPOSITORY** | **177** | **607** | **PASS (100%)** |
+
+---
+
+## 17. DATABASE & LEDGER IMPACT
+
+- **Database Migrations Added:** 1 migrasi (`2026_09_03_100000_create_journal_entry_sources_table.php`).
+- **New Tables:** 1 tabel (`journal_entry_sources`).
+- **Columns Added:** 1 kolom (`business_transactions.posted_journal_entry_id`).
+- **Ledger Impact:**
+  - Jurnal yang dihasilkan oleh P7.2 hanya berstatus `DRAFT`.
+  - **Zero Posted Ledger Impact:** Tidak ada saldo buku besar yang berubah. Status jurnal `DRAFT` tidak mempengaruhi neraca saldo (*trial balance*) maupun laporan posisi keuangan.
+
+---
+
+## 18. OUT-OF-SCOPE CONFIRMATION
+
+Komponen berikut **TIDAK DIIMPLEMENTASIKAN** pada P7.2 sesuai batasan perencanaan:
+- `JournalPostingService::post()` / `postSystemAutomated()` (Jadwal: P7.3)
+- `AutomationPostingAuthorization` (Jadwal: P7.3)
+- Pemrosesan antrean otomatis / queue workers (Jadwal: P7.4)
+- Eksekusi posting pemindahbukuan bank transfer (Jadwal: P7.5)
+- Subledger dan alokasi piutang invoice madrasah (Jadwal: Phase 8)
+
+---
+
+## 19. REMAINING ISSUES & P7.3 READINESS
+
+- **Outstanding Issues:** Tidak ada blocker atau cacat arsitektur terbuka.
+- **P7.3 Readiness:**
+  1. Draf jurnal yang dihasilkan telah terbukti seimbang (*balanced*), tervalidasi COA, dan tersimpan aman di tabel `journal_entries` dengan relasi kanonikal `journal_entry_sources`.
+  2. Sistem siap melangkah ke implementasi otorisasi dan posting jurnal otomatis pada Subphase P7.3 (*Single Core Posting Extension & System Authorization*).
+
+---
+
+## 20. FINAL P7.2 GATE VERDICT
+
+```text
+============================================================
+          PHASE 7 — P7.2 IMPLEMENTATION GATE
+============================================================
+
+JournalDraftDTO:
+[PASS]
+
+JournalLineDTO:
+[PASS]
+
+JournalDraftGenerator:
+[PASS]
+
+JournalPostingService Integration:
+[PASS]
+
+Multi-Line Journal:
+[PASS]
+
+Journal Source Relationship:
+[PASS]
+
+Database Migration:
+[PASS]
+
+PostgreSQL Verification:
+[PASS]
+
+Idempotency:
+[PASS]
+
+Atomic Rollback:
+[PASS]
+
+Tenant Isolation:
+[PASS]
+
+Receivable Boundary:
+[PASS]
+
+Auto-Post Boundary:
+[PRESERVED]
+
+P7.2 New Tests:
+[28 passed, 84 assertions, 0 errors, 0 failures]
+
+Full Regression:
+[177 passed, 607 assertions, 0 errors, 0 failures]
+
+P7.3 Readiness:
+[READY]
+
+FINAL VERDICT:
+[PASS]
+
+============================================================
+```
+
