@@ -348,3 +348,45 @@ class BusinessTransactionPostingApiTest extends TestCase
             'X-Tenant-ID' => (string) $this->orgA->id,
         ])->assertStatus(200);
 
+        // Reverse using admin (has journal.reverse)
+        Sanctum::actingAs($this->admin);
+
+        $response = $this->postJson("/api/v1/business-transactions/{$tx->id}/reverse", [
+            'reason' => 'Kesalahan nominal transaksi masuk',
+        ], [
+            'X-Tenant-ID' => (string) $this->orgA->id,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'success' => true,
+            'message' => 'Transaksi berhasil dibalik (reversed) di buku besar.',
+            'data' => [
+                'business_transaction_id' => $tx->id,
+                'original_journal_entry_id' => $draft->id,
+            ],
+        ]);
+        $this->assertNotEmpty($response->json('data.reversal_entry_number'));
+
+        $tx->refresh();
+        $this->assertSame('reversed', $tx->status);
+    }
+
+    public function test_reverse_api_fails_if_not_posted(): void
+    {
+        $tx = $this->createSampleTransaction();
+
+        Sanctum::actingAs($this->admin);
+
+        $response = $this->postJson("/api/v1/business-transactions/{$tx->id}/reverse", [
+            'reason' => 'Reversal on unposted',
+        ], [
+            'X-Tenant-ID' => (string) $this->orgA->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'error' => 'INVALID_WORKFLOW_STATE',
+        ]);
+    }
+}
