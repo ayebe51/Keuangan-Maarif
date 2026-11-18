@@ -238,3 +238,387 @@ class JournalPostingServiceAutomatedTest extends TestCase
             expectedRuleVersion: 1
         );
 
+        $this->expectException(CrossTenantViolationException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_cross_tenant_business_transaction(): void
+    {
+        [$draft, $bizTx, $rule] = $this->createValidScenario();
+
+        $orgBTx = TenantContext::forTenant($this->orgB->id, function () {
+            $periodB = FiscalPeriod::create([
+                'organization_id' => $this->orgB->id,
+                'code' => '2026-03-B',
+                'name' => 'Maret 2026 B',
+                'start_date' => '2026-03-01',
+                'end_date' => '2026-03-31',
+                'status' => 'open',
+            ]);
+
+            return BusinessTransaction::create([
+                'organization_id' => $this->orgB->id,
+                'transaction_number' => 'BT-2026-99999',
+                'fiscal_period_id' => $periodB->id,
+                'transaction_date' => '2026-03-15',
+                'transaction_type' => 'BANK_FEE_TAX',
+                'direction' => 'OUT',
+                'amount' => '25000.00',
+                'description' => 'Cross-tenant tx',
+                'status' => 'draft',
+            ]);
+        });
+
+        // Auth refers to draft in Org A, but bizTx in Org B
+        $auth = new AutomationPostingAuthorization(
+            organizationId: $this->orgA->id,
+            journalEntryId: $draft->id,
+            businessTransactionId: $orgBTx->id,
+            classificationRuleId: $rule->id,
+            expectedRuleVersion: 1
+        );
+
+        $this->expectException(CrossTenantViolationException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_cross_tenant_classification_rule(): void
+    {
+        [$draft, $bizTx] = $this->createValidScenario();
+
+        $orgBRule = TenantContext::forTenant($this->orgB->id, function () {
+            return ClassificationRule::create([
+                'organization_id' => $this->orgB->id,
+                'name' => 'Org B Rule',
+                'priority' => 10,
+                'is_active' => true,
+                'rule_type' => 'KEYWORD',
+                'pattern' => 'PAJAK',
+                'transaction_type' => 'BANK_FEE_TAX',
+                'auto_post' => true,
+                'max_auto_post_amount' => '500000.00',
+                'version' => 1,
+                'created_by' => $this->ruleCreatorAdmin->id,
+                'approved_by' => $this->ruleApprover->id,
+                'approved_at' => now(),
+            ]);
+        });
+
+        $auth = new AutomationPostingAuthorization(
+            organizationId: $this->orgA->id,
+            journalEntryId: $draft->id,
+            businessTransactionId: $bizTx->id,
+            classificationRuleId: $orgBRule->id,
+            expectedRuleVersion: 1
+        );
+
+        $this->expectException(CrossTenantViolationException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_unlinked_journal_source(): void
+    {
+        [$draft, $bizTx, $rule] = $this->createValidScenario();
+
+        // Create an unrelated business transaction
+        $unrelatedBizTx = BusinessTransaction::create([
+            'organization_id' => $this->orgA->id,
+            'transaction_number' => BusinessTransaction::generateTransactionNumber($this->orgA->id, 2026),
+            'fiscal_period_id' => $this->periodMaret2026->id,
+            'transaction_date' => '2026-03-15',
+            'transaction_type' => 'BANK_FEE_TAX',
+            'direction' => 'OUT',
+            'amount' => '10000.00',
+            'description' => 'Unrelated',
+            'status' => 'draft',
+        ]);
+
+        $auth = AutomationPostingAuthorization::fromEntities($draft, $unrelatedBizTx, $rule);
+
+        $this->expectException(InvalidAutomatedPostingSourceException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_already_posted_journal(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        // First post succeeds
+        $this->postingService->postSystemAutomated($draft, $auth);
+
+        // Second post must be rejected
+        $this->expectException(AutomatedPostingAlreadyExecutedException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_already_posted_business_transaction(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $bizTx->status = 'posted';
+        $bizTx->posted_journal_entry_id = $draft->id;
+        $bizTx->save();
+
+        $this->expectException(AutomatedPostingAlreadyExecutedException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_unapproved_rule(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $rule->approved_by = null;
+        $rule->approved_at = null;
+        $rule->save();
+
+        $this->expectException(RuleNotApprovedException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_inactive_or_revoked_rule(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $rule->is_active = false;
+        $rule->save();
+
+        $this->expectException(RuleRevokedException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_inactive_rule_approver(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $this->ruleApprover->is_active = false;
+        $this->ruleApprover->save();
+
+        $this->expectException(UnauthorizedRuleApproverException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_approver_without_journal_approve_permission(): void
+    {
+        [$draft, $bizTx, $rule] = $this->createValidScenario();
+
+        // Operator does NOT have journal.approve permission
+        $rule->approved_by = $this->makerOperator->id;
+        $rule->save();
+
+        $auth = AutomationPostingAuthorization::fromEntities($draft, $bizTx, $rule);
+
+        $this->expectException(UnauthorizedRuleApproverException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_rule_with_auto_post_disabled(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $rule->auto_post = false;
+        $rule->save();
+
+        $this->expectException(AutoPostDisabledException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_rule_with_zero_max_auto_post_amount(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $rule->max_auto_post_amount = '0.00';
+        $rule->save();
+
+        $this->expectException(AutoPostDisabledException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_transaction_amount_exceeding_threshold(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        // Lower threshold to Rp20.000 (Transaction is Rp25.000)
+        $rule->max_auto_post_amount = '20000.00';
+        $rule->save();
+
+        $this->expectException(AutoPostAmountExceededException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_transaction_before_effective_from(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $rule->effective_from = '2026-04-01'; // Transaction is 2026-03-15
+        $rule->save();
+
+        $this->expectException(InvalidAutomationAuthorizationException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_transaction_after_effective_to(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $rule->effective_to = '2026-02-28'; // Transaction is 2026-03-15
+        $rule->save();
+
+        $this->expectException(InvalidAutomationAuthorizationException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_rule_version_mismatch(): void
+    {
+        [$draft, $bizTx, $rule] = $this->createValidScenario();
+
+        // Auth expects version 1, but rule version in database has bumped to 2
+        $rule->version = 2;
+        $rule->save();
+
+        $auth = new AutomationPostingAuthorization(
+            organizationId: $this->orgA->id,
+            journalEntryId: $draft->id,
+            businessTransactionId: $bizTx->id,
+            classificationRuleId: $rule->id,
+            expectedRuleVersion: 1
+        );
+
+        $this->expectException(RuleSnapshotMismatchException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_rule_snapshot_hash_tampering(): void
+    {
+        [$draft, $bizTx, $rule] = $this->createValidScenario();
+
+        $auth = new AutomationPostingAuthorization(
+            organizationId: $this->orgA->id,
+            journalEntryId: $draft->id,
+            businessTransactionId: $bizTx->id,
+            classificationRuleId: $rule->id,
+            expectedRuleVersion: 1,
+            expectedRuleSnapshotHash: 'forged_hash_value'
+        );
+
+        $this->expectException(RuleSnapshotMismatchException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_sod_when_rule_creator_equals_rule_approver(): void
+    {
+        [$draft, $bizTx, $rule] = $this->createValidScenario();
+
+        // Self-approved rule
+        $rule->created_by = $this->ruleApprover->id;
+        $rule->approved_by = $this->ruleApprover->id;
+        $rule->save();
+
+        $auth = AutomationPostingAuthorization::fromEntities($draft, $bizTx, $rule);
+
+        $this->expectException(SegregationOfDutiesException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_sod_when_transaction_maker_equals_rule_approver(): void
+    {
+        [$draft, $bizTx, $rule] = $this->createValidScenario();
+
+        // Transaction maker is also the rule approver
+        $draft->created_by = $this->ruleApprover->id;
+        $draft->save();
+
+        $auth = AutomationPostingAuthorization::fromEntities($draft, $bizTx, $rule);
+
+        $this->expectException(TransactionMakerCannotApproveRuleException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_receivable_payment(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $bizTx->transaction_type = 'RECEIVABLE_PAYMENT';
+        $bizTx->save();
+
+        $this->expectException(InvalidAutomationAuthorizationException::class);
+        $this->expectExceptionMessage('RECEIVABLE_PAYMENT is strictly blocked');
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_unapplied_cash(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $bizTx->transaction_type = 'UNAPPLIED_CASH';
+        $bizTx->save();
+
+        $this->expectException(InvalidAutomationAuthorizationException::class);
+        $this->expectExceptionMessage('UNAPPLIED_CASH is prohibited');
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_ambiguous_bank_transfer(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $bizTx->transaction_type = 'BANK_TRANSFER';
+        $bizTx->transfer_pairing_status = 'PAIRING_AMBIGUOUS';
+        $bizTx->save();
+
+        $this->expectException(InvalidAutomationAuthorizationException::class);
+        $this->expectExceptionMessage('PAIRING_AMBIGUOUS');
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_unpaired_bank_transfer(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $bizTx->transaction_type = 'BANK_TRANSFER';
+        $bizTx->transfer_pairing_status = 'PENDING_PAIRING';
+        $bizTx->save();
+
+        $this->expectException(InvalidAutomationAuthorizationException::class);
+        $this->expectExceptionMessage('leg pairing status');
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_automated_rejects_closed_fiscal_period(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $this->periodMaret2026->status = FiscalPeriod::STATUS_CLOSED;
+        $this->periodMaret2026->save();
+
+        $this->expectException(ClosedFiscalPeriodException::class);
+        $this->postingService->postSystemAutomated($draft, $auth);
+    }
+
+    public function test_system_posted_journal_is_immutable(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $posted = $this->postingService->postSystemAutomated($draft, $auth);
+
+        $this->expectException(ImmutableJournalException::class);
+        $posted->description = 'Tampered description';
+        $posted->save();
+    }
+
+    public function test_system_posted_journal_can_be_reversed(): void
+    {
+        [$draft, $bizTx, $rule, $auth] = $this->createValidScenario();
+
+        $posted = $this->postingService->postSystemAutomated($draft, $auth);
+
+        $reversal = $this->postingService->reverse($posted, $this->ruleApprover, '2026-03-20', 'Koreksi kesalahan');
+
+        $this->assertSame(JournalEntry::STATUS_POSTED, $reversal->status);
+        $this->assertSame(JournalEntry::TYPE_REVERSAL, $reversal->entry_type);
+        $this->assertSame($this->ruleApprover->id, $reversal->posted_by);
+
+        $posted->refresh();
+        $this->assertSame(JournalEntry::STATUS_REVERSED, $posted->status);
+        $this->assertSame($reversal->id, $posted->reversed_entry_id);
+    }
+}
