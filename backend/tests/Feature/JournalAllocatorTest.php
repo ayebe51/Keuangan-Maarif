@@ -5,6 +5,9 @@ namespace Tests\Feature;
 use App\Domain\Accounting\Models\JournalEntry;
 use App\Domain\Accounting\Services\JournalNumberAllocator;
 use App\Domain\Organization\Models\Organization;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -14,14 +17,15 @@ class JournalAllocatorTest extends TestCase
     use RefreshDatabase;
 
     private Organization $org;
+
     private JournalNumberAllocator $allocator;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
 
         $this->org = Organization::where('code', 'LP-MAARIF-CLP')->first();
         $this->allocator = app(JournalNumberAllocator::class);

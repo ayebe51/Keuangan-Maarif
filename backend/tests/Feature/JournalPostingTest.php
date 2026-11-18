@@ -8,17 +8,16 @@ use App\Domain\Accounting\Exceptions\ImmutableJournalException;
 use App\Domain\Accounting\Exceptions\SegregationOfDutiesException;
 use App\Domain\Accounting\Exceptions\UnbalancedJournalException;
 use App\Domain\Accounting\Models\Account;
-use App\Domain\Accounting\Models\FiscalPeriod;
 use App\Domain\Accounting\Models\JournalEntry;
-use App\Domain\Accounting\Models\JournalLine;
-use App\Domain\Accounting\Services\FiscalPeriodService;
 use App\Domain\Accounting\Services\JournalPostingService;
 use App\Domain\Organization\Exceptions\CrossTenantViolationException;
 use App\Domain\Organization\Models\Organization;
 use App\Domain\Organization\Services\TenantContext;
 use App\Models\User;
+use Database\Seeders\CoaSeeder;
+use Database\Seeders\OrganizationSeeder;
+use Database\Seeders\RbacSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class JournalPostingTest extends TestCase
@@ -26,19 +25,25 @@ class JournalPostingTest extends TestCase
     use RefreshDatabase;
 
     private Organization $org;
+
     private Organization $orgOther;
+
     private User $maker;
+
     private User $checker;
+
     private JournalPostingService $postingService;
+
     private Account $accKas;
+
     private Account $accBeban;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(\Database\Seeders\RbacSeeder::class);
-        $this->seed(\Database\Seeders\OrganizationSeeder::class);
-        $this->seed(\Database\Seeders\CoaSeeder::class);
+        $this->seed(RbacSeeder::class);
+        $this->seed(OrganizationSeeder::class);
+        $this->seed(CoaSeeder::class);
 
         $this->org = Organization::where('code', 'LP-MAARIF-CLP')->first();
         $this->orgOther = Organization::create([
