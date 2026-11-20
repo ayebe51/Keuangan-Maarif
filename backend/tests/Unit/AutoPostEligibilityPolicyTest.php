@@ -198,3 +198,228 @@ class AutoPostEligibilityPolicyTest extends TestCase
         ]);
 
         $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('TRANSACTION_REJECTED', $eval->reasonCode);
+    }
+
+    public function test_unclassified_transaction_evaluates_to_requires_human_review(): void
+    {
+        $rule = $this->createValidRule();
+        $tx = $this->createValidTransaction($rule, [
+            'classification_status' => ClassificationStatus::SUGGESTED->value,
+        ]);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::REQUIRES_HUMAN_REVIEW, $eval->outcome);
+        $this->assertSame('NOT_CLASSIFIED', $eval->reasonCode);
+    }
+
+    public function test_auto_post_eligible_false_evaluates_to_requires_human_review(): void
+    {
+        $rule = $this->createValidRule();
+        $tx = $this->createValidTransaction($rule, [
+            'auto_post_eligible' => false,
+        ]);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::REQUIRES_HUMAN_REVIEW, $eval->outcome);
+        $this->assertSame('AUTO_POST_NOT_ELIGIBLE', $eval->reasonCode);
+    }
+
+    public function test_receivable_payment_strictly_blocked_pending_phase_8(): void
+    {
+        $rule = $this->createValidRule(['transaction_type' => 'RECEIVABLE_PAYMENT']);
+        $tx = $this->createValidTransaction($rule, [
+            'transaction_type' => 'RECEIVABLE_PAYMENT',
+        ]);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('RECEIVABLE_PAYMENT_BLOCKED', $eval->reasonCode);
+    }
+
+    public function test_unapplied_cash_requires_human_review(): void
+    {
+        $rule = $this->createValidRule(['transaction_type' => 'UNAPPLIED_CASH']);
+        $tx = $this->createValidTransaction($rule, [
+            'transaction_type' => 'UNAPPLIED_CASH',
+        ]);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::REQUIRES_HUMAN_REVIEW, $eval->outcome);
+        $this->assertSame('UNAPPLIED_CASH_BLOCKED', $eval->reasonCode);
+    }
+
+    public function test_bank_transfer_unpaired_requires_human_review(): void
+    {
+        $rule = $this->createValidRule(['transaction_type' => 'BANK_TRANSFER']);
+        $tx = $this->createValidTransaction($rule, [
+            'transaction_type' => 'BANK_TRANSFER',
+            'transfer_pairing_status' => 'PENDING_PAIRING',
+        ]);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::REQUIRES_HUMAN_REVIEW, $eval->outcome);
+        $this->assertSame('TRANSFER_UNPAIRED', $eval->reasonCode);
+    }
+
+    public function test_rule_inactive_evaluates_to_blocked(): void
+    {
+        $rule = $this->createValidRule(['is_active' => false]);
+        $tx = $this->createValidTransaction($rule);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('RULE_INACTIVE', $eval->reasonCode);
+    }
+
+    public function test_rule_unapproved_evaluates_to_blocked(): void
+    {
+        $rule = $this->createValidRule(['approved_by' => null, 'approved_at' => null]);
+        $tx = $this->createValidTransaction($rule);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('RULE_NOT_APPROVED', $eval->reasonCode);
+    }
+
+    public function test_rule_approver_missing_permission_evaluates_to_blocked(): void
+    {
+        $plainUser = User::create([
+            'organization_id' => $this->orgA->id,
+            'name' => 'Plain Approver Without Permissions',
+            'email' => 'plain_app@maarif-cilacap.org',
+            'password' => bcrypt('password'),
+            'is_active' => true,
+        ]);
+
+        $rule = $this->createValidRule(['approved_by' => $plainUser->id]);
+        $tx = $this->createValidTransaction($rule);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('UNAUTHORIZED_RULE_APPROVER', $eval->reasonCode);
+    }
+
+    public function test_rule_zero_default_amount_limit_evaluates_to_blocked(): void
+    {
+        $rule = $this->createValidRule(['max_auto_post_amount' => '0.00']);
+        $tx = $this->createValidTransaction($rule);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('ZERO_AUTO_POST_LIMIT', $eval->reasonCode);
+    }
+
+    public function test_amount_exceeding_rule_threshold_requires_human_review(): void
+    {
+        $rule = $this->createValidRule(['max_auto_post_amount' => '100000.00']);
+        $tx = $this->createValidTransaction($rule, [
+            'amount' => '150000.00',
+        ]);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::REQUIRES_HUMAN_REVIEW, $eval->outcome);
+        $this->assertSame('AMOUNT_EXCEEDS_THRESHOLD', $eval->reasonCode);
+    }
+
+    public function test_sod_rule_creator_cannot_be_approver_evaluates_to_blocked(): void
+    {
+        $rule = $this->createValidRule([
+            'created_by' => $this->ruleApprover->id,
+            'approved_by' => $this->ruleApprover->id,
+        ]);
+        $tx = $this->createValidTransaction($rule);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('SELF_APPROVED_RULE', $eval->reasonCode);
+    }
+
+    public function test_closed_fiscal_period_evaluates_to_blocked(): void
+    {
+        $closedPeriod = FiscalPeriod::create([
+            'organization_id' => $this->orgA->id,
+            'code' => '2025-12',
+            'name' => 'Desember 2025',
+            'period_type' => 'monthly',
+            'start_date' => '2025-12-01',
+            'end_date' => '2025-12-31',
+            'status' => 'closed',
+            'is_current' => false,
+        ]);
+
+        $rule = $this->createValidRule([
+            'effective_from' => '2025-01-01',
+            'effective_to' => '2026-12-31',
+        ]);
+        $tx = $this->createValidTransaction($rule, [
+            'fiscal_period_id' => $closedPeriod->id,
+            'transaction_date' => '2025-12-15',
+        ]);
+
+        $eval = $this->policy->evaluate($tx);
+
+        $this->assertFalse($eval->isEligible());
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED, $eval->outcome);
+        $this->assertSame('CLOSED_FISCAL_PERIOD', $eval->reasonCode);
+    }
+
+    public function test_candidate_selection_query_scope(): void
+    {
+        $rule = $this->createValidRule();
+
+        // 1. Valid Candidate
+        $candidate = $this->createValidTransaction($rule);
+
+        // 2. Already posted -> should not be candidate
+        $postedJournal = $this->createDummyJournalEntry('posted');
+        $posted = $this->createValidTransaction($rule, [
+            'status' => 'posted',
+            'posted_journal_entry_id' => $postedJournal->id,
+        ]);
+
+        // 3. Blocked category -> should not be candidate
+        $blocked = $this->createValidTransaction($rule, [
+            'transaction_type' => 'RECEIVABLE_PAYMENT',
+        ]);
+
+        // 4. Ineligible flag -> should not be candidate
+        $ineligible = $this->createValidTransaction($rule, [
+            'auto_post_eligible' => false,
+        ]);
+
+        $candidateIds = $this->policy->getEligibleCandidatesQuery($this->orgA->id)
+            ->pluck('id')
+            ->all();
+
+        $this->assertContains($candidate->id, $candidateIds);
+        $this->assertNotContains($posted->id, $candidateIds);
+        $this->assertNotContains($blocked->id, $candidateIds);
+        $this->assertNotContains($ineligible->id, $candidateIds);
+    }
+}
