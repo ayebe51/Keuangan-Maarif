@@ -178,3 +178,131 @@ class PostgreSqlAutomationPostingIntegrationTest extends TestCase
         }
     }
 
+    public function test_postgresql_pessimistic_lock_and_atomic_posting(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+
+        DB::connection('pgsql')->transaction(function () use ($f) {
+            // Row-lock journal entry
+            $je = DB::connection('pgsql')->table('journal_entries')
+                ->where('id', $f['je_id'])
+                ->lockForUpdate()
+                ->first();
+
+            $this->assertNotNull($je);
+            $this->assertSame('draft', $je->status);
+
+            // Row-lock business transaction
+            $bt = DB::connection('pgsql')->table('business_transactions')
+                ->where('id', $f['bt_id'])
+                ->lockForUpdate()
+                ->first();
+
+            $this->assertNotNull($bt);
+
+            // Row-lock rule
+            $rule = DB::connection('pgsql')->table('classification_rules')
+                ->where('id', $f['rule_id'])
+                ->lockForUpdate()
+                ->first();
+
+            $this->assertNotNull($rule);
+
+            // Execute update
+            DB::connection('pgsql')->table('journal_entries')
+                ->where('id', $f['je_id'])
+                ->update([
+                    'status' => 'posted',
+                    'posted_at' => now(),
+                    'posted_by' => null, // ZERO IDENTITY SPOOFING
+                    'posted_by_rule_id' => $f['rule_id'],
+                ]);
+
+            DB::connection('pgsql')->table('business_transactions')
+                ->where('id', $f['bt_id'])
+                ->update([
+                    'status' => 'posted',
+                    'posted_at' => now(),
+                    'posted_by' => null,
+                    'posted_journal_entry_id' => $f['je_id'],
+                ]);
+        });
+
+        // Verify state outside transaction
+        $postedJe = DB::connection('pgsql')->table('journal_entries')->where('id', $f['je_id'])->first();
+        $this->assertSame('posted', $postedJe->status);
+        $this->assertNull($postedJe->posted_by);
+        $this->assertSame($f['rule_id'], (int) $postedJe->posted_by_rule_id);
+
+        $postedBt = DB::connection('pgsql')->table('business_transactions')->where('id', $f['bt_id'])->first();
+        $this->assertSame('posted', $postedBt->status);
+        $this->assertSame($f['je_id'], (int) $postedBt->posted_journal_entry_id);
+
+        // Clean up
+        DB::connection('pgsql')->table('journal_entries')->where('id', $f['je_id'])->update(['posted_by_rule_id' => null, 'status' => 'draft']);
+        DB::connection('pgsql')->table('journal_entries')->where('id', $f['je_id'])->delete();
+        DB::connection('pgsql')->table('business_transactions')->where('id', $f['bt_id'])->delete();
+        DB::connection('pgsql')->table('classification_rules')->where('id', $f['rule_id'])->delete();
+    }
+
+    public function test_postgresql_rollback_on_failed_validation(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+
+        try {
+            DB::connection('pgsql')->transaction(function () use ($f) {
+                DB::connection('pgsql')->table('journal_entries')
+                    ->where('id', $f['je_id'])
+                    ->update(['status' => 'posted']);
+
+                // Simulate validation failure
+                throw new \RuntimeException('Simulated mid-transaction failure');
+            });
+        } catch (\RuntimeException $e) {
+            // Expected
+        }
+
+        // Verify journal entry remains draft
+        $je = DB::connection('pgsql')->table('journal_entries')->where('id', $f['je_id'])->first();
+        $this->assertSame('draft', $je->status);
+
+        // Clean up
+        DB::connection('pgsql')->table('journal_entries')->where('id', $f['je_id'])->delete();
+        DB::connection('pgsql')->table('business_transactions')->where('id', $f['bt_id'])->delete();
+        DB::connection('pgsql')->table('classification_rules')->where('id', $f['rule_id'])->delete();
+    }
+
+    public function test_postgresql_audit_persistence_for_automated_daemon(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+
+        $auditId = DB::connection('pgsql')->table('audit_logs')->insertGetId([
+            'organization_id' => $f['org']->id,
+            'user_id' => null, // Explicitly NULL: SYSTEM_DAEMON
+            'action' => 'JOURNAL_POSTED_AUTOMATED',
+            'model_type' => 'App\\Domain\\Accounting\\Models\\JournalEntry',
+            'model_id' => $f['je_id'],
+            'new_values' => json_encode([
+                'executor' => 'SYSTEM_DAEMON',
+                'posted_by_rule_id' => $f['rule_id'],
+                'amount' => '50000.00',
+            ]),
+            'notes' => 'PostgreSQL automated posting test',
+            'occurred_at' => now(),
+        ]);
+
+        $audit = DB::connection('pgsql')->table('audit_logs')->where('id', $auditId)->first();
+        $this->assertNotNull($audit);
+        $this->assertNull($audit->user_id, 'Audit log user_id must be null in PostgreSQL');
+        $this->assertSame('JOURNAL_POSTED_AUTOMATED', $audit->action);
+
+        // Clean up
+        DB::connection('pgsql')->table('audit_logs')->where('id', $auditId)->delete();
+        DB::connection('pgsql')->table('journal_entries')->where('id', $f['je_id'])->delete();
+        DB::connection('pgsql')->table('business_transactions')->where('id', $f['bt_id'])->delete();
+        DB::connection('pgsql')->table('classification_rules')->where('id', $f['rule_id'])->delete();
+    }
+}
