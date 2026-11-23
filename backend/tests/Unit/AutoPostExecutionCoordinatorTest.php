@@ -238,3 +238,192 @@ class AutoPostExecutionCoordinatorTest extends TestCase
     {
         $rule = $this->createValidRule(['transaction_type' => 'RECEIVABLE_PAYMENT']);
         $tx = $this->createValidTransaction($rule, [
+            'transaction_type' => 'RECEIVABLE_PAYMENT',
+        ]);
+
+        $result = $this->coordinator->execute($tx);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame(AutoPostDecisionOutcome::BLOCKED->value, $result['outcome']);
+        $this->assertSame('RECEIVABLE_PAYMENT_BLOCKED', $result['reason_code']);
+
+        $txFresh = $tx->fresh();
+        $this->assertNotSame('posted', $txFresh->status);
+        $this->assertNotNull($txFresh->posting_error);
+        $this->assertSame('RECEIVABLE_PAYMENT_BLOCKED', $txFresh->posting_error['error_code']);
+    }
+
+    public function test_execute_requires_human_review_when_amount_exceeds_threshold(): void
+    {
+        $rule = $this->createValidRule(['max_auto_post_amount' => '100000.00']);
+        $tx = $this->createValidTransaction($rule, [
+            'amount' => '250000.00',
+        ]);
+
+        $result = $this->coordinator->execute($tx);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame(AutoPostDecisionOutcome::REQUIRES_HUMAN_REVIEW->value, $result['outcome']);
+        $this->assertSame('AMOUNT_EXCEEDS_THRESHOLD', $result['reason_code']);
+
+        $txFresh = $tx->fresh();
+        $this->assertNotSame('posted', $txFresh->status);
+    }
+
+    public function test_execute_batch_processes_multiple_candidates(): void
+    {
+        $rule = $this->createValidRule();
+        $tx1 = $this->createValidTransaction($rule, ['amount' => '10000.00']);
+        $tx2 = $this->createValidTransaction($rule, ['amount' => '20000.00']);
+        $tx3 = $this->createValidTransaction($rule, ['amount' => '30000.00']);
+
+        $summary = $this->coordinator->executeBatch($this->orgA->id, 50);
+
+        $this->assertSame(3, $summary['total_candidates']);
+        $this->assertSame(3, $summary['posted_count']);
+        $this->assertSame(0, $summary['failed_count']);
+
+        $this->assertSame('posted', $tx1->fresh()->status);
+        $this->assertSame('posted', $tx2->fresh()->status);
+        $this->assertSame('posted', $tx3->fresh()->status);
+    }
+
+    public function test_execute_batch_respects_limit(): void
+    {
+        $rule = $this->createValidRule();
+        $tx1 = $this->createValidTransaction($rule, ['amount' => '10000.00']);
+        $tx2 = $this->createValidTransaction($rule, ['amount' => '20000.00']);
+        $tx3 = $this->createValidTransaction($rule, ['amount' => '30000.00']);
+
+        $summary = $this->coordinator->executeBatch($this->orgA->id, 2);
+
+        $this->assertSame(2, $summary['total_candidates']);
+        $this->assertSame(2, $summary['posted_count']);
+
+        $postedTotal = BusinessTransaction::where('organization_id', $this->orgA->id)
+            ->where('status', 'posted')
+            ->count();
+        $this->assertSame(2, $postedTotal);
+    }
+
+    public function test_execute_batch_failure_isolation(): void
+    {
+        $rule = $this->createValidRule(['max_auto_post_amount' => '100000.00']);
+
+        // Candidate 1: valid
+        $tx1 = $this->createValidTransaction($rule, ['amount' => '10000.00']);
+
+        // Candidate 2: exceeds threshold -> will be skipped to human review during execution
+        $tx2 = $this->createValidTransaction($rule, ['amount' => '500000.00']);
+
+        // Candidate 3: valid
+        $tx3 = $this->createValidTransaction($rule, ['amount' => '20000.00']);
+
+        $summary = $this->coordinator->executeBatch($this->orgA->id, 50);
+
+        $this->assertSame(3, $summary['total_candidates']);
+        $this->assertSame(2, $summary['posted_count']);
+        $this->assertSame(1, $summary['skipped_count']);
+        $this->assertSame(0, $summary['failed_count']);
+
+        $this->assertSame('posted', $tx1->fresh()->status);
+        $this->assertNotSame('posted', $tx2->fresh()->status);
+        $this->assertSame('posted', $tx3->fresh()->status);
+    }
+
+    public function test_execute_batch_enforces_tenant_isolation(): void
+    {
+        $ruleA = $this->createValidRule();
+
+        TenantContext::setTenantId($this->orgB->id);
+        $bankAccountB = BankAccount::where('organization_id', $this->orgB->id)->firstOrFail();
+        $accountB = Account::where('organization_id', $this->orgB->id)->where('code', '5200')->firstOrFail();
+        $cpB = Counterparty::where('organization_id', $this->orgB->id)->firstOrFail();
+        $periodB = FiscalPeriod::where('organization_id', $this->orgB->id)->where('code', '2026-03')->firstOrFail();
+        $catB = TransactionCategory::where('organization_id', $this->orgB->id)->where('code', 'OUT-PAJAK-BUNGA')->firstOrFail();
+
+        $ruleB = ClassificationRule::create([
+            'organization_id' => $this->orgB->id,
+            'name' => 'Rule Org B AutoPost',
+            'priority' => 10,
+            'is_active' => true,
+            'rule_type' => 'KEYWORD',
+            'direction' => 'OUT',
+            'bank_account_id' => $bankAccountB->id,
+            'pattern' => 'PAJAK BUNGA',
+            'pattern_type' => 'contains',
+            'transaction_type' => 'BANK_FEE_TAX',
+            'target_account_id' => $accountB->id,
+            'counterparty_id' => $cpB->id,
+            'auto_post' => true,
+            'max_auto_post_amount' => '500000.00',
+            'version' => 1,
+            'created_by' => $this->ruleCreatorAdmin->id,
+            'approved_by' => $this->ruleApprover->id,
+            'approved_at' => now(),
+            'effective_from' => '2026-01-01',
+            'effective_to' => '2026-12-31',
+        ]);
+
+        $bankImportB = BankImport::create([
+            'organization_id' => $this->orgB->id,
+            'bank_account_id' => $bankAccountB->id,
+            'imported_by' => $this->makerOperator->id,
+            'filename' => 'bri_org_b.csv',
+            'format' => 'csv',
+            'file_hash' => hash('sha256', 'dummy_import_b'),
+            'total_rows' => 5,
+            'status' => 'done',
+        ]);
+
+        $bankTxB = BankTransaction::create([
+            'organization_id' => $this->orgB->id,
+            'bank_account_id' => $bankAccountB->id,
+            'bank_import_id' => $bankImportB->id,
+            'transaction_date' => '2026-03-15',
+            'value_date' => '2026-03-15',
+            'description' => 'PAJAK BUNGA BANK MARET 2026 ORG B',
+            'reference_number' => 'REF-COORD-B-'.uniqid(),
+            'direction' => BankTransactionDirection::OUT,
+            'amount' => '15000.00',
+            'fingerprint' => hash('sha256', uniqid('fp_b_', true)),
+            'balance_after' => 5000000.00,
+        ]);
+
+        $txB = BusinessTransaction::create([
+            'organization_id' => $this->orgB->id,
+            'transaction_number' => BusinessTransaction::generateTransactionNumber($this->orgB->id, 2026),
+            'bank_transaction_id' => $bankTxB->id,
+            'fiscal_period_id' => $periodB->id,
+            'transaction_date' => '2026-03-15',
+            'value_date' => '2026-03-15',
+            'transaction_type' => 'BANK_FEE_TAX',
+            'direction' => 'OUT',
+            'amount' => '15000.00',
+            'transaction_category_id' => $catB->id,
+            'target_account_id' => $accountB->id,
+            'counterparty_id' => $cpB->id,
+            'classification_status' => ClassificationStatus::CLASSIFIED->value,
+            'classification_method' => 'DETERMINISTIC_RULE',
+            'auto_post_eligible' => true,
+            'description' => 'Pajak Bunga Org B',
+            'status' => 'draft',
+            'rule_snapshot' => $ruleB->toSnapshot(),
+        ]);
+
+        TenantContext::setTenantId($this->orgA->id);
+        $txA = $this->createValidTransaction($ruleA, ['amount' => '12000.00']);
+
+        // Execute batch for Org A only
+        $summary = $this->coordinator->executeBatch($this->orgA->id, 50);
+
+        $this->assertSame(1, $summary['total_candidates']);
+        $this->assertSame(1, $summary['posted_count']);
+        $this->assertSame('posted', $txA->fresh()->status);
+
+        // Org B transaction must still be draft
+        TenantContext::setTenantId($this->orgB->id);
+        $this->assertSame('draft', $txB->fresh()->status);
+        $this->assertNull($txB->fresh()->posted_journal_entry_id);
+    }
+}
