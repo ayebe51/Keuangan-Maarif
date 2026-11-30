@@ -318,3 +318,324 @@ class PostgreSqlBankTransferConcurrencyTest extends TestCase
                 $amount,
                 '2026-03-12',
                 'TRSF KE REK BSI TIGA JUTA LIMA RATUS'
+            );
+
+            // Leg IN: BSI <- BRI (next day)
+            $btInId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bsi_id'],
+                'IN',
+                $amount,
+                '2026-03-13',
+                'TRSF DARI REK BRI TIGA JUTA LIMA RATUS'
+            );
+
+            $coordinator = app(BankTransferPostingCoordinator::class);
+
+            // Pair the transactions
+            $pairResult = $coordinator->pair($btOutId, $btInId);
+            $this->assertTrue($pairResult->isSuccessful());
+            $this->assertTrue($pairResult->isPaired());
+            $this->assertSame(TransferPairingStatus::PAIRED, $pairResult->status);
+
+            // Verify PostgreSQL row states
+            $legOut = DB::connection('pgsql')->table('business_transactions')->where('id', $btOutId)->first();
+            $legIn = DB::connection('pgsql')->table('business_transactions')->where('id', $btInId)->first();
+
+            $this->assertSame('PAIRED', $legOut->transfer_pairing_status);
+            $this->assertSame('PAIRED', $legIn->transfer_pairing_status);
+            $this->assertSame($btInId, (int) $legOut->paired_business_transaction_id);
+            $this->assertSame($btOutId, (int) $legIn->paired_business_transaction_id);
+
+            // Generate Compound 2:1 Transfer Journal Draft
+            $draftJournal = $coordinator->createTransferJournalDraft($btOutId, $f['operator']);
+
+            $this->assertNotNull($draftJournal);
+            $this->assertSame('draft', $draftJournal->status);
+            $this->assertSame(JournalEntry::TYPE_ADJUSTMENT, $draftJournal->entry_type);
+
+            // Database lines check on PostgreSQL
+            $lines = DB::connection('pgsql')->table('journal_lines')
+                ->where('journal_entry_id', $draftJournal->id)
+                ->orderBy('line_number')
+                ->get();
+
+            $this->assertCount(2, $lines);
+            // Line 1: Debit Destination Bank (BSI)
+            $this->assertSame($f['acc_bsi_id'], (int) $lines[0]->account_id);
+            $this->assertEquals(3500000.00, (float) $lines[0]->debit);
+            $this->assertEquals(0.00, (float) $lines[0]->credit);
+
+            // Line 2: Credit Source Bank (BRI)
+            $this->assertSame($f['acc_bri_id'], (int) $lines[1]->account_id);
+            $this->assertEquals(0.00, (float) $lines[1]->debit);
+            $this->assertEquals(3500000.00, (float) $lines[1]->credit);
+
+            // Verify journal_entry_sources has EXACTLY 2 rows on PostgreSQL
+            $sources = DB::connection('pgsql')->table('journal_entry_sources')
+                ->where('journal_entry_id', $draftJournal->id)
+                ->orderBy('leg_role')
+                ->get();
+
+            $this->assertCount(2, $sources);
+            $sourceRoles = $sources->pluck('leg_role')->all();
+            sort($sourceRoles);
+            $this->assertSame(['transfer_destination', 'transfer_source'], $sourceRoles);
+
+            $sourceLegOut = $sources->firstWhere('leg_role', 'transfer_source');
+            $this->assertSame($btOutId, (int) $sourceLegOut->business_transaction_id);
+
+            $sourceLegIn = $sources->firstWhere('leg_role', 'transfer_destination');
+            $this->assertSame($btInId, (int) $sourceLegIn->business_transaction_id);
+        } finally {
+            TenantContext::setTenantId(null);
+        }
+    }
+
+    public function test_postgresql_concurrency_race_condition_guard_on_pairing(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+        TenantContext::setTenantId($f['org']->id);
+
+        try {
+            $amount = 1250000.00;
+
+            $btOutId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bri_id'],
+                'OUT',
+                $amount,
+                '2026-03-14',
+                'TRSF OUT RACE TEST'
+            );
+
+            $btInId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bsi_id'],
+                'IN',
+                $amount,
+                '2026-03-14',
+                'TRSF IN RACE TEST'
+            );
+
+            $coordinator = app(BankTransferPostingCoordinator::class);
+
+            // First worker pairs successfully
+            $res1 = $coordinator->pair($btOutId, $btInId);
+            $this->assertTrue($res1->isSuccessful());
+
+            // Second worker attempts to pair already paired transaction
+            $this->expectException(InvalidTransferPairingException::class);
+            $coordinator->pair($btOutId, $btInId);
+        } finally {
+            TenantContext::setTenantId(null);
+        }
+    }
+
+    public function test_postgresql_twin_leg_synchronization_on_posting_and_reversal(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+        TenantContext::setTenantId($f['org']->id);
+
+        try {
+            $amount = 2000000.00;
+
+            $btOutId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bri_id'],
+                'OUT',
+                $amount,
+                '2026-03-10',
+                'TRSF KE BSI SYNC TEST'
+            );
+
+            $btInId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bsi_id'],
+                'IN',
+                $amount,
+                '2026-03-10',
+                'TRSF DARI BRI SYNC TEST'
+            );
+
+            $coordinator = app(BankTransferPostingCoordinator::class);
+            $coordinator->pair($btOutId, $btInId);
+
+            $draft = $coordinator->createTransferJournalDraft($btOutId, $f['operator']);
+
+            // Human Posting via BusinessTransactionPostingCoordinator (Checker != Maker)
+            $postingCoordinator = app(BusinessTransactionPostingCoordinator::class);
+            $postResult = $postingCoordinator->approveAndPost($btOutId, $f['approver']);
+
+            $this->assertTrue($postResult['success']);
+            $postedEntry = $postResult['journal_entry'];
+            $this->assertSame('posted', $postedEntry->status);
+
+            // Assert BOTH legs are posted on PostgreSQL
+            $legOut = DB::connection('pgsql')->table('business_transactions')->where('id', $btOutId)->first();
+            $legIn = DB::connection('pgsql')->table('business_transactions')->where('id', $btInId)->first();
+
+            $this->assertSame('posted', $legOut->status);
+            $this->assertSame($postedEntry->id, (int) $legOut->posted_journal_entry_id);
+
+            $this->assertSame('posted', $legIn->status);
+            $this->assertSame($postedEntry->id, (int) $legIn->posted_journal_entry_id);
+
+            // Reverse the posted transfer journal entry
+            $revResult = $postingCoordinator->reverse($btOutId, $f['approver'], 'Mistaken internal transfer booking');
+            $this->assertTrue($revResult['success']);
+
+            // Assert BOTH legs are reverted to 'reversed' on PostgreSQL
+            $legOutRev = DB::connection('pgsql')->table('business_transactions')->where('id', $btOutId)->first();
+            $legInRev = DB::connection('pgsql')->table('business_transactions')->where('id', $btInId)->first();
+
+            $this->assertSame('reversed', $legOutRev->status);
+            $this->assertSame('reversed', $legInRev->status);
+        } finally {
+            TenantContext::setTenantId(null);
+        }
+    }
+
+    public function test_postgresql_transfer_posting_guard_rejects_unpaired(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+        TenantContext::setTenantId($f['org']->id);
+
+        try {
+            $amount = 800000.00;
+
+            $btOutId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bri_id'],
+                'OUT',
+                $amount,
+                '2026-03-11',
+                'UNPAIRED TRANSFER GUARD TEST'
+            );
+
+            // Attempt to post unpaired transfer transaction
+            $postingCoordinator = app(BusinessTransactionPostingCoordinator::class);
+            $this->expectException(UnpairedTransferException::class);
+            $postingCoordinator->approveAndPost($btOutId, $f['approver']);
+        } finally {
+            TenantContext::setTenantId(null);
+        }
+    }
+
+    public function test_postgresql_unapplied_cash_draft_creation_strictly_pnl_neutral(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+        TenantContext::setTenantId($f['org']->id);
+
+        try {
+            $amount = 1750000.00;
+
+            // Incoming transaction with UNAPPLIED_CASH mapping to liability account 2200
+            $btId = $this->createPostgresUnappliedCashTx(
+                $f,
+                $f['bank_bri_id'],
+                $amount,
+                '2026-03-16',
+                'TRANSFER DARI DONATUR GELAP UNAPPLIED'
+            );
+
+            $handler = app(UnappliedCashHandler::class);
+            $bt = BusinessTransaction::withoutGlobalScopes()->findOrFail($btId);
+
+            $this->assertTrue($handler->identify($bt));
+
+            $draft = $handler->createDraft($bt, $f['operator']);
+
+            $this->assertNotNull($draft);
+            $this->assertSame('draft', $draft->status);
+            $this->assertSame('receipt', $draft->entry_type);
+
+            // Verify lines in PostgreSQL
+            $lines = DB::connection('pgsql')->table('journal_lines')
+                ->where('journal_entry_id', $draft->id)
+                ->orderBy('line_number')
+                ->get();
+
+            $this->assertCount(2, $lines);
+
+            // Line 1: Debit Bank Asset
+            $this->assertSame($f['acc_bri_id'], (int) $lines[0]->account_id);
+            $this->assertEquals(1750000.00, (float) $lines[0]->debit);
+            $this->assertEquals(0.00, (float) $lines[0]->credit);
+
+            // Line 2: Credit Liability Account 2200 (Titipan Kas) - ZERO revenue recognition!
+            $this->assertSame($f['acc_unapplied_id'], (int) $lines[1]->account_id);
+            $this->assertEquals(0.00, (float) $lines[1]->debit);
+            $this->assertEquals(1750000.00, (float) $lines[1]->credit);
+
+            // Verify account type of account 2200 is liability
+            $accType = DB::connection('pgsql')->table('accounts')->where('id', $lines[1]->account_id)->value('account_type');
+            $this->assertSame('liability', $accType);
+
+            // Verify provenance in journal_entry_sources
+            $source = DB::connection('pgsql')->table('journal_entry_sources')
+                ->where('journal_entry_id', $draft->id)
+                ->first();
+
+            $this->assertNotNull($source);
+            $this->assertSame('primary', $source->leg_role);
+            $this->assertSame('business_transaction', $source->source_type);
+            $this->assertSame($btId, (int) $source->business_transaction_id);
+        } finally {
+            TenantContext::setTenantId(null);
+        }
+    }
+
+    public function test_postgresql_rollback_on_invalid_pairing_preserves_state(): void
+    {
+        $this->skipIfNotPostgreSql();
+        $f = $this->getOrCreateFixtures();
+        TenantContext::setTenantId($f['org']->id);
+
+        try {
+            // Two transactions with different amounts (incompatible)
+            $btOutId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bri_id'],
+                'OUT',
+                1000000.00,
+                '2026-03-12',
+                'TRSF OUT RB TEST'
+            );
+
+            $btInId = $this->createPostgresTransferTx(
+                $f,
+                $f['bank_bsi_id'],
+                'IN',
+                2000000.00, // Incompatible amount!
+                '2026-03-12',
+                'TRSF IN RB TEST'
+            );
+
+            $coordinator = app(BankTransferPostingCoordinator::class);
+
+            try {
+                $coordinator->pair($btOutId, $btInId);
+                $this->fail('Expected InvalidTransferPairingException was not thrown.');
+            } catch (InvalidTransferPairingException $e) {
+                $this->assertStringContainsString('do not match', $e->getMessage());
+            }
+
+            // Verify both rows remained unchanged
+            $legOut = DB::connection('pgsql')->table('business_transactions')->where('id', $btOutId)->first();
+            $legIn = DB::connection('pgsql')->table('business_transactions')->where('id', $btInId)->first();
+
+            $this->assertSame('PENDING_PAIRING', $legOut->transfer_pairing_status);
+            $this->assertNull($legOut->paired_business_transaction_id);
+
+            $this->assertSame('PENDING_PAIRING', $legIn->transfer_pairing_status);
+            $this->assertNull($legIn->paired_business_transaction_id);
+        } finally {
+            TenantContext::setTenantId(null);
+        }
+    }
+}
