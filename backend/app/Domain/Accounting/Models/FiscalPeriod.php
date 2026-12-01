@@ -11,11 +11,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class FiscalPeriod extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use BelongsToTenant, HasFactory;
 
     public const STATUS_OPEN = 'open';
+
     public const STATUS_SOFT_CLOSE = 'soft_close';
+
     public const STATUS_CLOSED = 'closed';
+
     public const STATUS_LOCKED = 'locked';
 
     protected $table = 'fiscal_periods';
@@ -63,7 +66,7 @@ class FiscalPeriod extends Model
     public function scopeForDate(Builder $query, string $date): Builder
     {
         return $query->where('start_date', '<=', $date)
-                     ->where('end_date', '>=', $date);
+            ->where('end_date', '>=', $date);
     }
 
     public function closedBy(): BelongsTo
