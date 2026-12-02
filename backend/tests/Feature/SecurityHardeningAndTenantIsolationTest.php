@@ -398,3 +398,254 @@ class SecurityHardeningAndTenantIsolationTest extends TestCase
         $this->transferCoordinator->pair($txA, $txB, $this->approver);
     }
 
+    public function test_bank_transfer_pairing_rejects_actor_without_review_or_approve_permission(): void
+    {
+        $txA = $this->createTestTransaction($this->orgA->id, 'BANK_TRANSFER', 'OUT', '1000000.00', $this->bankAccountA->id);
+        $txB = $this->createTestTransaction($this->orgA->id, 'BANK_TRANSFER', 'IN', '1000000.00', $this->bankAccountA2->id);
+
+        $this->expectException(AuthorizationException::class);
+
+        $this->transferCoordinator->pair($txA, $txB, $this->plainUser);
+    }
+
+    public function test_bank_transfer_unpairing_rejects_period_locked_transactions(): void
+    {
+        $txA = $this->createTestTransaction($this->orgA->id, 'BANK_TRANSFER', 'OUT', '1000000.00', $this->bankAccountA->id);
+        $txB = $this->createTestTransaction($this->orgA->id, 'BANK_TRANSFER', 'IN', '1000000.00', $this->bankAccountA2->id);
+
+        $this->transferCoordinator->pair($txA, $txB, $this->approver);
+
+        $txA->refresh();
+        $txA->is_period_locked = true;
+        $txA->save();
+
+        $this->expectException(ClosedFiscalPeriodException::class);
+
+        $this->transferCoordinator->unpair($txA, $this->approver);
+    }
+
+    public function test_bank_transfer_unpairing_rejects_actor_without_review_or_approve_permission(): void
+    {
+        $txA = $this->createTestTransaction($this->orgA->id, 'BANK_TRANSFER', 'OUT', '1000000.00', $this->bankAccountA->id);
+        $txB = $this->createTestTransaction($this->orgA->id, 'BANK_TRANSFER', 'IN', '1000000.00', $this->bankAccountA2->id);
+
+        $this->transferCoordinator->pair($txA, $txB, $this->approver);
+
+        $this->expectException(AuthorizationException::class);
+
+        $this->transferCoordinator->unpair($txA, $this->plainUser);
+    }
+
+    public function test_business_transaction_posting_coordinator_rejects_period_locked_transaction_on_approve_and_post(): void
+    {
+        $tx = $this->createTestTransaction($this->orgA->id, 'DONATION_GENERAL', 'IN', '250000.00');
+        $tx->is_period_locked = true;
+        $tx->save();
+
+        $this->expectException(ClosedFiscalPeriodException::class);
+
+        $this->postingCoordinator->approveAndPost($tx, $this->approver);
+    }
+
+    public function test_business_transaction_posting_coordinator_rejects_unauthorized_approver(): void
+    {
+        $tx = $this->createTestTransaction($this->orgA->id, 'DONATION_GENERAL', 'IN', '250000.00');
+
+        $this->expectException(AuthorizationException::class);
+
+        $this->postingCoordinator->approveAndPost($tx, $this->operator); // Operator lacks journal.approve & journal.post
+    }
+
+    public function test_business_transaction_posting_coordinator_rejects_period_locked_transaction_on_reject(): void
+    {
+        $tx = $this->createTestTransaction($this->orgA->id, 'DONATION_GENERAL', 'IN', '250000.00');
+        $tx->is_period_locked = true;
+        $tx->save();
+
+        $this->expectException(ClosedFiscalPeriodException::class);
+
+        $this->postingCoordinator->reject($tx, $this->operator, 'Salah klasifikasi');
+    }
+
+    public function test_fiscal_period_service_close_period_cascades_is_period_locked_to_business_transactions(): void
+    {
+        $tx1 = $this->createTestTransaction($this->orgA->id, 'DONATION_GENERAL', 'IN', '100000.00');
+        $tx2 = $this->createTestTransaction($this->orgA->id, 'OPERATIONAL_EXPENSE', 'OUT', '50000.00');
+
+        $this->assertFalse($tx1->is_period_locked);
+        $this->assertFalse($tx2->is_period_locked);
+
+        // Close period
+        $closedPeriod = $this->fiscalPeriodService->closePeriod($this->openPeriodA, $this->admin);
+
+        $this->assertEquals(FiscalPeriod::STATUS_CLOSED, $closedPeriod->status);
+
+        $tx1->refresh();
+        $tx2->refresh();
+
+        $this->assertTrue($tx1->is_period_locked);
+        $this->assertTrue($tx2->is_period_locked);
+        $this->assertEquals($closedPeriod->id, $tx1->fiscal_period_id);
+        $this->assertEquals($closedPeriod->id, $tx2->fiscal_period_id);
+    }
+
+    public function test_fiscal_period_service_reopen_period_cascades_unlock_to_business_transactions(): void
+    {
+        $tx = $this->createTestTransaction($this->orgA->id, 'DONATION_GENERAL', 'IN', '100000.00');
+
+        $this->fiscalPeriodService->closePeriod($this->openPeriodA, $this->admin);
+
+        $tx->refresh();
+        $this->assertTrue($tx->is_period_locked);
+
+        // Reopen period
+        $reopenedPeriod = $this->fiscalPeriodService->reopenPeriod(
+            $this->openPeriodA,
+            $this->admin,
+            'Koreksi pembukuan akhir bulan audit'
+        );
+
+        $this->assertEquals(FiscalPeriod::STATUS_OPEN, $reopenedPeriod->status);
+
+        $tx->refresh();
+        $this->assertFalse($tx->is_period_locked);
+    }
+
+    public function test_journal_posting_service_post_rejects_date_in_closed_fiscal_period(): void
+    {
+        $draft = $this->journalPostingService->createDraft([
+            'organization_id' => $this->orgA->id,
+            'entry_date' => $this->openPeriodA->start_date->format('Y-m-d'),
+            'lines' => [
+                ['account_id' => $this->cashAccountA->id, 'debit' => '100000.00', 'credit' => '0.00'],
+                ['account_id' => $this->revenueAccountA->id, 'debit' => '0.00', 'credit' => '100000.00'],
+            ],
+        ], $this->operator);
+
+        // Close period before posting
+        $this->fiscalPeriodService->closePeriod($this->openPeriodA, $this->admin);
+
+        $this->expectException(ClosedFiscalPeriodException::class);
+
+        $this->journalPostingService->post($draft, $this->approver);
+    }
+
+    public function test_journal_posting_service_reversal_succeeds_for_closed_original_period_when_reversal_date_is_in_open_period(): void
+    {
+        // 1. Create and post entry in Period A
+        $entryDate = $this->openPeriodA->start_date->format('Y-m-d');
+        $originalEntry = $this->journalPostingService->createDraft([
+            'organization_id' => $this->orgA->id,
+            'entry_date' => $entryDate,
+            'description' => 'Original transaction in Period A',
+            'lines' => [
+                ['account_id' => $this->cashAccountA->id, 'debit' => '100000.00', 'credit' => '0.00'],
+                ['account_id' => $this->revenueAccountA->id, 'debit' => '0.00', 'credit' => '100000.00'],
+            ],
+        ], $this->operator);
+
+        $this->journalPostingService->post($originalEntry, $this->approver);
+        $originalEntry->refresh();
+        $this->assertEquals(JournalEntry::STATUS_POSTED, $originalEntry->status);
+
+        // 2. Create Next Period B and keep it OPEN
+        $nextPeriod = FiscalPeriod::create([
+            'organization_id' => $this->orgA->id,
+            'code' => 'PER-NEXT-2026',
+            'name' => 'Next Fiscal Period 2026',
+            'period_type' => 'monthly',
+            'start_date' => '2026-04-01',
+            'end_date' => '2026-04-30',
+            'status' => FiscalPeriod::STATUS_OPEN,
+            'is_current' => false,
+        ]);
+
+        // 3. Close Period A
+        $this->fiscalPeriodService->closePeriod($this->openPeriodA, $this->admin);
+        $this->openPeriodA->refresh();
+        $this->assertEquals(FiscalPeriod::STATUS_CLOSED, $this->openPeriodA->status);
+
+        // 4. Reverse original entry specifying a target date inside the open Next Period
+        $reversalDate = '2026-04-05';
+        $reversalEntry = $this->journalPostingService->reverse(
+            originalEntry: $originalEntry,
+            user: $this->approver,
+            reason: 'Salah pencatatan periode lalu dibalik di periode berjalan',
+            reversalDate: $reversalDate
+        );
+
+        $this->assertEquals(JournalEntry::STATUS_POSTED, $reversalEntry->status);
+        $this->assertEquals('2026-04-05', $reversalEntry->entry_date->format('Y-m-d'));
+        $this->assertEquals($nextPeriod->id, $reversalEntry->fiscal_period_id);
+
+        $originalEntry->refresh();
+        $this->assertEquals(JournalEntry::STATUS_REVERSED, $originalEntry->status);
+        $this->assertEquals($reversalEntry->id, $originalEntry->reversed_entry_id);
+    }
+
+    public function test_journal_posting_service_reversal_fails_when_target_reversal_date_is_in_closed_period(): void
+    {
+        $draft = $this->journalPostingService->createDraft([
+            'organization_id' => $this->orgA->id,
+            'entry_date' => $this->openPeriodA->start_date->format('Y-m-d'),
+            'lines' => [
+                ['account_id' => $this->cashAccountA->id, 'debit' => '100000.00', 'credit' => '0.00'],
+                ['account_id' => $this->revenueAccountA->id, 'debit' => '0.00', 'credit' => '100000.00'],
+            ],
+        ], $this->operator);
+
+        $posted = $this->journalPostingService->post($draft, $this->approver);
+
+        // Close period
+        $this->fiscalPeriodService->closePeriod($this->openPeriodA, $this->admin);
+
+        $this->expectException(ClosedFiscalPeriodException::class);
+
+        // Attempting to reverse back into the closed period
+        $this->journalPostingService->reverse(
+            originalEntry: $posted,
+            user: $this->approver,
+            reason: 'Reversal into closed period',
+            reversalDate: $this->openPeriodA->start_date->format('Y-m-d')
+        );
+    }
+
+    private function createTestTransaction(
+        int $organizationId,
+        string $type,
+        string $direction,
+        string $amount,
+        ?int $bankAccountId = null
+    ): BusinessTransaction {
+        $bankTx = null;
+        if ($bankAccountId) {
+            $bankTx = BankTransaction::create([
+                'organization_id' => $organizationId,
+                'bank_account_id' => $bankAccountId,
+                'transaction_date' => $this->openPeriodA->start_date->format('Y-m-d'),
+                'value_date' => $this->openPeriodA->start_date->format('Y-m-d'),
+                'amount' => $amount,
+                'direction' => $direction === 'OUT' ? BankTransactionDirection::OUT : BankTransactionDirection::IN,
+                'description' => 'Test Bank Tx',
+                'reference_number' => 'REF-SEC-'.uniqid(),
+                'fingerprint' => hash('sha256', uniqid('fp_sec_', true)),
+                'balance_after' => 10000000.00,
+            ]);
+        }
+
+        return BusinessTransaction::create([
+            'organization_id' => $organizationId,
+            'transaction_number' => 'BTX-'.uniqid(),
+            'transaction_date' => $this->openPeriodA->start_date->format('Y-m-d'),
+            'transaction_type' => $type,
+            'direction' => $direction,
+            'amount' => $amount,
+            'description' => 'Test Transaction '.$type,
+            'status' => 'pending',
+            'is_period_locked' => false,
+            'fiscal_period_id' => $this->openPeriodA->id,
+            'bank_transaction_id' => $bankTx?->id,
+            'counterparty_id' => $this->counterpartyA->id,
+        ]);
+    }
+}
